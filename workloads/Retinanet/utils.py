@@ -1,5 +1,6 @@
 import ttsim.front.functional.op as F
 import ttsim.front.functional.sim_nn as SimNN
+import numpy as np
 
 def conv3x3(name, in_planes, out_planes, stride=1):
     """3x3 convolution with padding (TTSIM)"""
@@ -143,66 +144,91 @@ class Downsample(SimNN.Module):
         x = self.bn(x)
         return x
 
-# BBoxTransform and ClipBoxes can be added here if needed
+class BBoxTransform(SimNN.Module):
+    def __init__(self, objname):
+        super().__init__()
+        self.name = objname
+        super().link_op2module()
 
-# class BBoxTransform(SimNN.Module):
-#     def __init__(self, objname):
-#         super().__init__()
-#         self.name = objname
-#         super().link_op2module()
+    def __call__(self, boxes, deltas):
+        widths  = boxes[:, :, 2] - boxes[:, :, 0]
+        heights = boxes[:, :, 3] - boxes[:, :, 1]
+        ctr_x   = boxes[:, :, 0] + 0.5 * widths
+        ctr_y   = boxes[:, :, 1] + 0.5 * heights
 
-#     def __call__(self, boxes, deltas):
-#         widths  = boxes[:, :, 2] - boxes[:, :, 0]
-#         heights = boxes[:, :, 3] - boxes[:, :, 1]
-#         ctr_x   = boxes[:, :, 0] + 0.5 * widths
-#         ctr_y   = boxes[:, :, 1] + 0.5 * heights
+        dx = deltas[:, :, 0]
+        dy = deltas[:, :, 1]
+        dw = deltas[:, :, 2]
+        dh = deltas[:, :, 3]
 
-#         dx = deltas[:, :, 0]
-#         dy = deltas[:, :, 1]
-#         dw = deltas[:, :, 2]
-#         dh = deltas[:, :, 3]
+        pred_ctr_x = dx * widths + ctr_x
+        pred_ctr_y = dy * heights + ctr_y
+        pred_w     = F.Exp(f"{self.name}_exp_dw")(dw) * widths
+        pred_h     = F.Exp(f"{self.name}_exp_dh")(dh) * heights
 
-#         pred_ctr_x = dx * widths + ctr_x
-#         pred_ctr_y = dy * heights + ctr_y
-#         pred_w     = F.Exp(f"{self.name}_exp_dw")(dw) * widths
-#         pred_h     = F.Exp(f"{self.name}_exp_dh")(dh) * heights
+        pred_boxes_x1 = pred_ctr_x - 0.5 * pred_w
+        pred_boxes_y1 = pred_ctr_y - 0.5 * pred_h
+        pred_boxes_x2 = pred_ctr_x + 0.5 * pred_w
+        pred_boxes_y2 = pred_ctr_y + 0.5 * pred_h
 
-#         pred_boxes_x1 = pred_ctr_x - 0.5 * pred_w
-#         pred_boxes_y1 = pred_ctr_y - 0.5 * pred_h
-#         pred_boxes_x2 = pred_ctr_x + 0.5 * pred_w
-#         pred_boxes_y2 = pred_ctr_y + 0.5 * pred_h
+        pred_boxes = F.ConcatX(f"{self.name}_concat", axis=2)(
+            pred_boxes_x1,
+            pred_boxes_y1,
+            pred_boxes_x2,
+            pred_boxes_y2,
+        )
+        return pred_boxes
 
-#         pred_boxes = F.ConcatX(f"{self.name}_concat", axis=2)(
-#             pred_boxes_x1,
-#             pred_boxes_y1,
-#             pred_boxes_x2,
-#             pred_boxes_y2,
-#         )
-#         return pred_boxes
+class ClipBoxes(SimNN.Module):  
+    def __init__(self, objname):
+        super().__init__()
+        self.name = objname
+        super().link_op2module()
 
-# class ClipBoxes(SimNN.Module):  
-#     def __init__(self, objname):
-#         super().__init__()
-#         self.name = objname
-#         super().link_op2module()
+    def __call__(self, boxes, img):
+        batch_size, _, height, width = F.Shape(f"{self.name}_shape")(img)
 
-#     def __call__(self, boxes, img):
-#         batch_size, _, height, width = F.Shape(f"{self.name}_shape")(img)
+        x1 = F.Max(f"{self.name}_max_x1")(
+            boxes[:, :, 0], F._from_value(f"{self.name}_zero", 0)
+        )
+        y1 = F.Max(f"{self.name}_max_y1")(
+            boxes[:, :, 1], F._from_value(f"{self.name}_zero", 0)
+        )
+        x2 = F.Min(f"{self.name}_min_x2")(
+            boxes[:, :, 2], F._from_value(f"{self.name}_width", width - 1)
+        )
+        y2 = F.Min(f"{self.name}_min_y2")(
+            boxes[:, :, 3], F._from_value(f"{self.name}_height", height - 1)
+        )
 
-#         x1 = F.Max(f"{self.name}_max_x1")(
-#             boxes[:, :, 0], F._from_value(f"{self.name}_zero", 0)
-#         )
-#         y1 = F.Max(f"{self.name}_max_y1")(
-#             boxes[:, :, 1], F._from_value(f"{self.name}_zero", 0)
-#         )
-#         x2 = F.Min(f"{self.name}_min_x2")(
-#             boxes[:, :, 2], F._from_value(f"{self.name}_width", width - 1)
-#         )
-#         y2 = F.Min(f"{self.name}_min_y2")(
-#             boxes[:, :, 3], F._from_value(f"{self.name}_height", height - 1)
-#         )
+        clipped_boxes = F.ConcatX(f"{self.name}_concat", axis=2)(
+            x1, y1, x2, y2
+        )
+        return clipped_boxes 
 
-#         clipped_boxes = F.ConcatX(f"{self.name}_concat", axis=2)(
-#             x1, y1, x2, y2
-#         )
-#         return clipped_boxes 
+
+def nms(boxes, scores, threshold=0.5):
+    
+    if len(boxes) == 0: return []
+    
+    x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
+    areas = (x2 - x1 + 1) * (y2 - y1 + 1)
+    order = scores.argsort()[::-1]
+
+    keep = []
+    while order.size > 0:
+        i = order[0]
+        keep.append(i)
+        xx1 = np.maximum(x1[i], x1[order[1:]])
+        yy1 = np.maximum(y1[i], y1[order[1:]])
+        xx2 = np.minimum(x2[i], x2[order[1:]])
+        yy2 = np.minimum(y2[i], y2[order[1:]])
+
+        w = np.maximum(0.0, xx2 - xx1 + 1)
+        h = np.maximum(0.0, yy2 - yy1 + 1)
+        inter = w * h
+        ovr = inter / (areas[i] + areas[order[1:]] - inter)
+
+        inds = np.where(ovr <= threshold)[0]
+        order = order[inds + 1]
+    return keep

@@ -7,9 +7,9 @@ import os, sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
 import ttsim.front.functional.op as F
 import ttsim.front.functional.sim_nn as SimNN
+from workloads.Retinanet.anchor import AnchorsPolaris 
 
-
-from workloads.Retinanet.utils import BasicBlock, Bottleneck, Downsample
+from workloads.Retinanet.utils import BasicBlock, Bottleneck, Downsample , BBoxTransform, ClipBoxes,nms
 
 class PyramidFeatures(SimNN.Module):
     def __init__(self, objname, C3_size, C4_size, C5_size, feature_size=256):
@@ -213,60 +213,58 @@ class ResNet(SimNN.Module):
 
         outplanes = planes * block.expansion
 
-    # downsample if stride changes or channels change
         downsample = None
         if stride != 1 or self.inplanes != outplanes:
             downsample = Downsample(
                 f"{self.name}_down_{planes}",self.inplanes,outplanes,stride,
-           )
-
-    # first block in this layer
+        )
         layers.append(block(
-            f"{self.name}_layer{planes}_0",
-            self.inplanes, planes, stride=stride,downsample=downsample,
+            f"{self.name}_layer{planes}_0",   # objname
+            self.inplanes,                    # inplanes
+            planes,                           # planes
+            stride=stride,
+            downsample=downsample,
         ))
         self.inplanes = outplanes
 
-    # remaining blocks
         for i in range(1, blocks):
             layers.append(block(
-                f"{self.name}_layer{planes}_{i}",self.inplanes, planes, stride=1,downsample=None,
-            ))
-
+                f"{self.name}_layer{planes}_{i}",
+                self.inplanes,
+                planes,
+                stride=1,
+                downsample=None,
+        ))
         mlist = SimNN.ModuleList(layers)
         for m in mlist:
             self._submodules[m.name] = m
         return mlist
+    
+    # freeze_bn for training
 
     def forward(self, x):
-        # stem
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
         x = self.maxpool(x)
 
-    # layer1 → C2 (we won't return this)
         out = x
         for m in self.layer1:
            out = m(out)
         C2 = out
 
-    # layer2 → C3
         for m in self.layer2:
             out = m(out)
         C3 = out
 
-    # layer3 → C4
         for m in self.layer3:
             out = m(out)
         C4 = out
 
-    # layer4 → C5
         for m in self.layer4:
             out = m(out)
         C5 = out
 
-    # Return C3, C4, C5 as in FPN paper
         return C3, C4, C5
     
 class RetinaNet(SimNN.Module):
@@ -283,13 +281,18 @@ class RetinaNet(SimNN.Module):
         elif depth == 50:
             block, layers = Bottleneck, [3,4,6,3]
             C3_size, C4_size, C5_size = 512, 1024, 2048
-        # etc
 
         self.backbone = ResNet(f"{self.name}_backbone", block, layers)
         self.fpn      = PyramidFeatures(f"{self.name}_fpn", C3_size, C4_size, C5_size)
-        self.reg_head = RegressionModel(f"{self.name}_reg", 256)
-        self.cls_head = ClassificationModel(f"{self.name}_cls", 256, num_classes=self.num_classes)
-
+        self.regressionModel = RegressionModel(f"{self.name}_reg", 256)
+        self.classificationModel = ClassificationModel(f"{self.name}_cls", 256, num_classes=self.num_classes)
+        
+        self.anchors      = AnchorsPolaris() # Assuming this is your torch-free class
+        
+        self.regressBoxes = BBoxTransform(f"{self.name}_bbox_trans")
+        
+        self.clipBoxes    = ClipBoxes(f"{self.name}_clip_boxes")
+        
         super().link_op2module()
 
     def create_input_tensors(self):
@@ -298,21 +301,62 @@ class RetinaNet(SimNN.Module):
         }
 
     def __call__(self, x=None):
+
         x = self.input_tensors["x_in"] if x is None else x
+        
         C3, C4, C5 = self.backbone.forward(x)
         features   = self.fpn([C3, C4, C5])
 
-        reg = F.ConcatX(f"{self.name}_reg_concat", axis=1)(
-            *[self.reg_head(f) for f in features]
+        regression = F.ConcatX(f"{self.name}_reg_concat", axis=1)(
+            *[self.regressionModel(f) for f in features]
         )
-        cls = F.ConcatX(f"{self.name}_cls_concat", axis=1)(
-            *[self.cls_head(f) for f in features]
+        classification = F.ConcatX(f"{self.name}_cls_concat", axis=1)(
+            *[self.classificationModel(f) for f in features]
         )
-        return cls, reg
 
-    def get_forward_graph(self):
-        return super()._get_forward_graph(self.input_tensors)
+        anchors_np = self.anchors(self.img_size, self.img_size)
 
+        transformed_anchors = self.regressBoxes(anchors_np, regression)
+        transformed_anchors = self.clipBoxes(transformed_anchors, x)
+    #  check
+        final_cls_scores = classification.data[0]               # Shape: [NumAnchors, NumClasses]
+        final_bbox_coords = transformed_anchors.data[0] # Shape: [NumAnchors, 4]
+
+        return self._post_process(final_cls_scores, final_bbox_coords)
+
+    def _post_process(self, cls_scores, bbox_coords):
+        import numpy as np
+
+        finalScores = []
+        finalAnchorBoxesIndexes = []
+        finalAnchorBoxesCoordinates  = []
+
+        for class_id in range(self.num_classes):
+            scores = cls_scores[:, class_id]
+            
+            mask = scores > 0.05
+            if not np.any(mask):
+                continue
+
+            filtered_scores = scores[mask]
+            anchorBoxes  = bbox_coords[mask]
+
+            anchors_nms_idx = nms(anchorBoxes, filtered_scores, 0.5)
+
+            if len(anchors_nms_idx) > 0:
+                finalScores.append(filtered_scores[anchors_nms_idx])
+                finalAnchorBoxesIndexes.append(np.full(len(anchors_nms_idx), class_id))
+                finalAnchorBoxesCoordinates.append(anchorBoxes[anchors_nms_idx])
+
+        if len(finalScores) > 0:
+            return [
+                np.concatenate(finalScores), 
+                np.concatenate(finalAnchorBoxesIndexes), 
+                np.concatenate(finalAnchorBoxesCoordinates)
+            ]
+        else:
+            return [np.array([]), np.array([]), np.array([])]
+    
     
 def resnet18_backbone(objname):
         # ResNet‑18: BasicBlock, [2,2,2,2]
