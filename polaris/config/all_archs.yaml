@@ -1,0 +1,129 @@
+# SPDX-FileCopyrightText: (C) 2025 Tenstorrent AI ULC
+# SPDX-License-Identifier: Apache-2.0
+ipblocks:
+    -   name: tensix  # neo config
+        iptype: compute
+        l2_cache:
+            num_banks: 64
+            bytes_per_clk_per_bank: 64
+        pipes:
+        -   name: matrix
+            num_units   : 4
+            freq_MHz    : 1000
+            instructions:
+            -   {name: add, tpt: { int8: 128, bf16: 128, fp16: 128, fp8: 128,}}
+            -   {name: sub, tpt: { int8: 128, bf16: 128, fp16: 128, fp8: 128,}}
+            -   {name: mul, tpt: { int8: 128, bf16: 128, fp16: 128, fp8: 128,}}
+            -   {name: mac, tpt: { int8: 2048, bf16: 2048, fp16: 2048, fp8: 2048,}}
+        -   name: vector
+            num_units   : 4
+            freq_MHz    : 1000
+            instructions:
+            -   {name: add,   tpt: {int8: 128.,  int32: 32., fp32: 32. }}
+            -   {name: sub,   tpt: {int8: 128.,  int32: 32., fp32: 32. }}
+            -   {name: mul,   tpt: {int8: 128.,  int32: 32., fp32: 32. }}
+            -   {name: div,   tpt: {int8: 128.,  int32: 32., fp32: 32. }}
+            -   {name: mac,   tpt: {int8: 128.,  int32: 32., fp32: 32. }}
+            -   {name: tanh,  tpt: {int8: 128.,  int32: 32., fp32: 32. }}
+            -   {name: log,   tpt: {int8: 128.,  int32: 32., fp32: 32. }}
+            -   {name: exp,   tpt: {int8: 128.,  int32: 32., fp32: 32. }}
+            -   {name: sqrt,  tpt: {int8: 128.,  int32: 32., fp32: 32. }}
+            -   {name: rsqrt, tpt: {int8: 128.,  int32: 32., fp32: 32. }}
+            -   {name: reciprocal,  tpt: {int8: 128.,  int32: 32., fp32: 32. }}
+            -   {name: cmp,   tpt: {int8: 128.,  int32: 32., fp32: 32. }}
+            -   {name: mov,   tpt: {int8: 128.,  int32: 32., fp32: 32. }}
+            -   {name: max,   tpt: {int8: 128.,  int32: 32., fp32: 32. }}
+            -   {name: sin, tpt: { int32: 32., fp32: 32. }}
+            -   {name: cos, tpt: { int32: 32., fp32: 32. }}
+
+    -   name: gddr6
+        iptype: memory
+        technology: GDDR
+        data_bits : 32
+        data_rate : 8
+        freq_MHz  : 1250
+        size_GB   : 4
+    -   name: gddr7
+        iptype: memory
+        technology: GDDR
+        data_bits : 32
+        data_rate : 16
+        freq_MHz  : 1250
+        size_GB   : 2
+    -   name: hbm1
+        iptype: memory
+        technology: HBM
+        freq_MHz  : 500
+        stacks    : 8
+        data_bits : 128
+        size_GB   : 4
+    -   name: hbm2
+        iptype: memory
+        technology: HBM
+        freq_MHz  : 1200
+        stacks    : 8
+        data_bits : 128
+        size_GB   : 8
+    -   name: hbm2e
+        iptype: memory
+        technology: HBM
+        freq_MHz  : 1800
+        stacks    : 8
+        data_bits : 128
+        size_GB   : 16
+    -   name: hbm3
+        iptype: memory
+        technology: HBM
+        freq_MHz  : 3200
+        stacks    : 16
+        data_bits : 64
+        size_GB   : 16
+    -   name: hbm3e
+        iptype: memory
+        technology: HBM
+        freq_MHz  : 4900
+        stacks    : 16
+        data_bits : 64
+        size_GB   : 48
+    -   name: hbm4
+        iptype: memory
+        technology: HBM
+        freq_MHz  : 3200
+        stacks    : 32
+        data_bits : 64
+        size_GB   : 64
+
+packages:
+    -   name: Grendel
+        instances:
+        -   name: Q1_S1
+            ipgroups:
+            -   ipname: tensix
+                iptype: compute
+                num_units   : 32
+                ramp_penalty: 50
+            -   ipname: gddr7
+                iptype: memory
+                num_units: 8
+        -   name: Q1_A1
+            ipgroups:
+            -   ipname: tensix
+                iptype:  compute
+                num_units : 32
+                freq_MHz  : 1200
+                ramp_penalty: 50
+            -   ipname: gddr7
+                iptype: memory
+                num_units: 16
+                freq_MHz : 1250
+        -   name: Q2_A2
+            ipgroups:
+            -   ipname: tensix
+                iptype: compute
+                num_units : 64
+                freq_MHz  : 1200
+                ramp_penalty: 100
+            -   ipname: gddr7
+                iptype: memory
+                num_units: 24
+                freq_MHz : 1250

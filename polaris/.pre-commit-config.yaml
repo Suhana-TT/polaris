@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: (C) 2025 Tenstorrent AI ULC
+# SPDX-License-Identifier: Apache-2.0
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+
+fail_fast: true
+
+repos:
+-   repo: local
+    hooks:
+        -   id: spdx-checker
+            name: Check SPDX License and Copyright
+            description: Check SPDX License and Copyright
+            language: python
+            entry: tools/spdxchecker.py
+            args: [--config, .github/spdxchecker-config.yml, --loglevel, error]
+            additional_dependencies: [pyyaml, loguru, pydantic]
+            pass_filenames: false
+        -   id: static checker
+            name: Run static checks on the repository
+            description: Check static checks
+            language: python
+            entry: ./checkin_tests.py
+            args:  [static]
+            # additional_dependencies: [pyyaml, loguru, pydantic]
+            pass_filenames: false
+        -   id: unit tests
+            name: Run unit tests
+            description: Run unit tests
+            language: python
+            entry: pytest
+            args: [-m, 'unit and not slow and not tools_secondary']
+            pass_filenames: false

@@ -1,0 +1,310 @@
+#!/usr/bin/env python
+# SPDX-FileCopyrightText: (C) 2025 Tenstorrent AI ULC
+# SPDX-License-Identifier: Apache-2.0
+import sys
+import yaml
+import csv
+import json
+from typing import Any, Iterable
+from importlib import import_module, util as importlib_util
+from pathlib import Path
+from loguru import logger
+from copy import deepcopy
+from functools import lru_cache, reduce
+import operator as op
+from collections.abc import KeysView
+from ttsim.utils.readfromurl import locator_handle
+
+
+openpyxl = None
+
+class dict2obj:
+    def __init__(self, d):
+        for key, value in d.items():
+            key = key if isinstance(key, str) else str(key)
+            if isinstance(value, dict):
+                setattr(self, key, dict2obj(value))
+            elif isinstance(value, (list, tuple)):
+                setattr(self, key, [dict2obj(item) if isinstance(item, dict) else item for item in value])
+            else:
+                setattr(self, key, value)
+
+    def __getattr__(self, item):
+        raise AttributeError(f"Attribute '{item}' not found!!")
+
+def parse_csv(csvfilename):
+    with open(locator_handle(csvfilename)) as fcsv:
+        rowlines = [row.strip() for row in fcsv]
+
+    # Skip rows beginning with '#', and blank rows
+    rowlines = [rowlines[0]] + [row for row in rowlines[1:] if row != '' and not row.startswith('#')]
+
+    reader = csv.DictReader(rowlines)
+    rows = [row for row in reader]
+    # DictReader has fieldnames attribute
+    cols = reader.fieldnames
+
+    return rows, cols
+
+def parse_xlsx(filename, sheetname=None):
+    global openpyxl
+    if openpyxl is None:
+        openpyxl = import_module('openpyxl')
+    wb = openpyxl.load_workbook(filename, read_only=True, data_only=True)
+    if sheetname is not None:
+        try:
+            wsheet = wb[sheetname]
+        except KeyError:
+            raise RuntimeError(f'no worksheet {sheetname} in {filename}')
+    else:
+        sheetnames = wb.sheetnames
+        if len(sheetnames) == 1:
+            sheetname = sheetnames[0]
+            wsheet = wb[sheetname]
+            logger.info('using sheet {}', sheetname)
+        else:
+            raise RuntimeError(f'too many sheets in {filename}, choose one of {sheetnames}')
+
+    # get the columnnames, and headermap from first row
+    header = dict()
+    column_names = []
+    for input_row in wsheet.iter_rows(min_row=1, max_row=1):
+        for cell in input_row:
+            if cell.value is None:  # empty
+                continue
+            header[cell.column_letter] = cell.value
+            column_names.append(cell.value)
+    # table is a list, each entry will be a dict corresponding to a row
+    table = []
+    for input_row in wsheet.iter_rows(min_row=2, max_row=wsheet.max_row + 1):
+        row = {col: None for col in column_names}
+        is_empty = True
+        for cell in input_row:
+            if cell.value is None:  # empty
+                continue
+            if cell.column_letter == 'A' and cell.value.startswith('#'):
+                break
+            try:
+                row[header[cell.column_letter]] = cell.value
+            except KeyError:
+                # Cell with blank column header - looks like remark - skip
+                break
+            is_empty = False
+        if is_empty:
+            continue
+        table.append(row)
+    return table, column_names
+
+def parse_worksheet(filename):
+    if filename.endswith('csv'):
+        return parse_csv(filename)
+    elif filename.endswith('xls') or filename.endswith('xlsx'):
+        if '@' in filename:
+            sheet_name, input_file = filename.split('@')
+        else:
+            sheet_name, input_file = None, filename
+        return parse_xlsx(input_file, sheet_name)
+    else:
+        raise RuntimeError(f'reading worksheet file "{filename} not supported')
+
+def parse_yaml(yamlfile):
+    res = None
+    with open(locator_handle(yamlfile)) as yamlf:
+        res = yaml.safe_load(yamlf)
+    return res
+
+#TODO: Check if this sucks for large YAMLs: convert to streaming generator instead...
+def parse_multidoc_yaml(yamlfile):
+    res = None
+    with open(locator_handle(yamlfile)) as yamlf:
+        res = []
+        for rec in yaml.safe_load_all(yamlf):
+            res.append(rec)
+    return res
+
+def print_csv(outcols: KeysView[str] | list[str], outrows: list[dict[str, Any]], filename: Path | str):
+    # newline should be '' for DictWriter
+    with open(filename, 'w', newline='') as ocsv:
+        writer = csv.DictWriter(ocsv, fieldnames=outcols)
+        writer.writeheader()
+        for xrow in outrows:
+            writer.writerow(xrow)
+
+def print_json(jsdata, jsfilename):
+    with open(jsfilename, 'w') as jsf:
+        json.dump(jsdata, jsf)
+
+def print_yaml(obj, ofilename):
+    yaml_str = yaml.dump(obj)
+    with open(ofilename, 'w', newline='') as YF:
+        YF.write(yaml_str)
+    return
+
+@lru_cache(128)
+def get_ttsim_python_class(python_module_path):
+    """
+        Use lru_cache - the same python_module_path is used for each instance of a workload. The dynamic import is
+        required only once for the module path (inclusive of the @ class specifier)
+    """
+    module_path = Path(python_module_path)
+    python_module_name = module_path.stem
+    if '@' in python_module_name:              # name@file means import name from file
+        for tmp in module_path.parent.parts:   # Ensure '@' only in filename, not in intermediate parts
+            assert '@' not in tmp
+        name_parts = module_path.name.split('@')  # Split name, not stem, so as not to lose the extension
+        assert len(name_parts) == 2            # Ensure only one '@'
+        python_module_name = name_parts[0]
+        module_path = module_path.parent / name_parts[1]
+    spec = importlib_util.spec_from_file_location(python_module_name, module_path)
+    # TODO: If module name not found in module path, give hint about known class names and the @ syntax
+    assert spec is not None
+    mod = importlib_util.module_from_spec(spec)
+    assert mod is not None
+    assert spec.loader is not None
+    spec.loader.exec_module(mod)
+    wl_cls = getattr(mod, python_module_name)
+    return wl_cls
+
+def get_ttsim_functional_instance(python_module_path, python_instance_name, python_instance_cfg):
+    wl_cls = get_ttsim_python_class(python_module_path)
+    python_instance = wl_cls(python_instance_name, python_instance_cfg)
+    return python_instance
+
+def get_ttnn_functional_instance(python_module_path, python_instance_name, python_instance_cfg):
+    wl_func = get_ttsim_python_class(python_module_path)
+    return wl_func
+
+def str_to_bool(s):
+    if isinstance(s, bool):
+        return s
+    if isinstance(s, int):
+        return s != 0
+    if isinstance(s, float):
+        return s != 0
+    if s.lower() in ['true', 't', 'yes', 'y', 'on', 'enable', '1']:
+        return True
+    elif s.lower() in ['false', 'f', 'no', 'n', 'off', 'disable', '0']:
+        return False
+    else:
+        raise ValueError('expecting boolean value')
+
+def convert_units(val, from_unit, to_unit):
+    from_unit, to_unit = from_unit.upper(), to_unit.upper()
+    from_unit = ' B' if from_unit == 'B' else from_unit
+    to_unit   = ' B' if to_unit   == 'B' else to_unit
+
+    supported_factors = ['T', 'G', 'M', 'K', ' ']
+    supported_types   = ['HZ', 'B', 'FLOPS', 'OPS']
+    supported_units   = [f + t for f in supported_factors for t in supported_types]
+    assert from_unit in supported_units, f"from_unit: {from_unit} should be one of {supported_units}!!"
+    assert to_unit   in supported_units, f"to_unit: {to_unit} should be one of {supported_units}!!"
+    ff, ft = from_unit[0], from_unit[1:]
+    tf, tt = to_unit[0],   to_unit[1:]
+    assert ft == tt, f"Illegal unit conversion {from_unit} --> {to_unit}!!"
+
+    exp_tbl = {
+            ('T', 'T'):  0,  ('T', 'G'):  1, ('T', 'M'):  2, ('T', 'K'):  3, ('T', ' '): 4,
+            ('G', 'T'): -1,  ('G', 'G'):  0, ('G', 'M'):  1, ('G', 'K'):  2, ('G', ' '): 3,
+            ('M', 'T'): -2,  ('M', 'G'): -1, ('M', 'M'):  0, ('M', 'K'):  1, ('M', ' '): 2,
+            ('K', 'T'): -3,  ('K', 'G'): -2, ('K', 'M'): -1, ('K', 'K'):  0, ('K', ' '): 1,
+            (' ', 'T'): -4,  (' ', 'G'): -3, (' ', 'M'): -2, (' ', 'K'): -1, (' ', ' '): 0,
+            }
+    try:
+        exp = exp_tbl[(ff,tf)]
+    except KeyError:
+        print(f"convert_units: {from_unit} --> {to_unit} not supported!!")
+        raise
+
+    new_val = val * (1024 ** exp) if ft == 'B' else val * (1000 ** exp)
+    return new_val
+
+def make_tuple(value, tuple_len):
+    if isinstance(value, tuple([tuple, list])):
+        if len(value) != tuple_len:
+            raise RuntimeError(f'incompatible tuple/list with {len(value)} instead of {tuple_len} elements')
+        return value
+    if isinstance(value, int):
+        return tuple([value for _ in range(tuple_len)])
+    raise NotImplementedError(f'{value} for make_tuple')
+
+def check_known_args(opname: str, /,
+                     args: dict[str, Any],
+                     default_args: dict[str, Any]) -> None:
+    unknown_args = set(args.keys()) - set(default_args.keys())
+    if unknown_args:
+         raise AssertionError(f'Unknown args {unknown_args} used with operator {opname}')
+
+def get_kwargs_with_defaults(opname: str, /,
+                             args: dict[str, Any],
+                             default_args: dict[str, Any]) -> dict[str, Any]:
+    """
+        Utility function to get the values of arguments, with defaults for missing ones.
+        Also asserts that there are no unknown / unsupported arguments
+    """
+    check_known_args(opname, args, default_args)
+    eff_args = deepcopy(default_args)
+    eff_args.update(args)
+    return eff_args
+
+
+def prod_ints(L: Iterable[int]) -> int:
+    return reduce(op.mul, L, 1)
+
+
+class CustomLogger:
+    """
+    Custom logger utility class for managing message filtering in loguru.
+
+    This class provides functionality to prevent duplicate log messages when the 'once' flag
+    is set in the log record's extra data. It maintains a static history of logged messages
+    to ensure that messages marked with 'once=True' are only logged once per unique
+    (level, message) combination.
+
+    Attributes:
+        _message_history (set): Static set that stores tuples of (level_name, message)
+                               for messages that have been logged with the 'once' flag.
+    """
+    _message_history: set = set()
+
+    @staticmethod
+    def filter_for_once(record):
+        """
+        Filter function for loguru that prevents duplicate messages when 'once' is True.
+
+        Args:
+            record: Loguru record object containing log information
+
+        Returns:
+            bool: False if message should be filtered out (already logged), True otherwise
+        """
+        if record.get('extra', {}).get('once', False):
+            message_key = (record['level'].name, record['message'])
+            if message_key in CustomLogger._message_history:
+                return False
+            CustomLogger._message_history.add(message_key)
+        return True
+
+
+def setup_logger(level: str = 'INFO') -> None:
+    """
+    Configure loguru logger with consistent format and level.
+    
+    This function removes all existing loguru handlers and adds a new stdout handler
+    with the specified log level. It also applies the CustomLogger.filter_for_once
+    filter to prevent duplicate messages when the 'once' flag is used in log records.
+
+    Args:
+        level (str): Log level to set. Defaults to 'INFO'.
+                     Valid values: 'TRACE', 'DEBUG', 'INFO', 'SUCCESS', 'WARNING', 'ERROR', 'CRITICAL'
+
+    Note:
+        The logger is configured with CustomLogger.filter_for_once filter, which prevents
+        duplicate messages for log records that have 'once=True' in their extra data.
+
+    Example:
+        >>> setup_logger('DEBUG')
+        >>> logger.info("This message will appear", extra={'once': True})
+        >>> logger.info("This message will appear", extra={'once': True})  # This won't be shown
+    """
+    logger.remove()
+    logger.add(sys.stdout, level=level, filter=CustomLogger.filter_for_once)

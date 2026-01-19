@@ -1,0 +1,61 @@
+# SPDX-FileCopyrightText: (C) 2025 Tenstorrent AI ULC
+# SPDX-License-Identifier: Apache-2.0
+op_data_type_spec:
+  global_type: int8
+  override:
+    dropout: int32
+
+op_removal_spec:
+  - Dropout
+  - Identity
+  - Constant
+
+op_fusion_spec:
+  - [Add, LayerNormalization, Matmul, Add, Matmul, Add, Gelu]
+  - [Add, LayerNormalization, Matmul, Add, Split]
+  - [Add, LayerNormalization, Matmul]
+  - [Add, LayerNormalization]
+  - [Reshape, Transpose, Transpose]
+  - [Reshape, Transpose]
+  - [Transpose, Transpose]
+  - [Matmul, Add, Matmul, Add, Gelu]
+  - [Matmul, Matmul]
+  - [Matmul, Mul, Softmax]
+  - [Matmul, Mul]
+  - [Matmul, Add, Split]
+  - [Matmul, Add, Gelu]
+  - [Matmul, Add]
+  - [Matmul, Gelu, Add]
+  - [Matmul, Transpose, Reshape]
+  - [Conv, Relu]
+  - [Conv, BatchNormalization, Add, Relu, AveragePool, Reshape]
+  - [Conv, BatchNormalization, Add, Relu]
+  - [Conv, BatchNormalization, Relu, MaxPool]
+  - [Conv, BatchNormalization, Relu]
+  - [Conv, BatchNormalization, LeakyRelu]
+  - [Conv, BatchNormalization, Sigmoid, Mul]
+  - [Conv, BatchNormalization, Mul]
+  - [Conv, BatchNormalization]
+
+op_rsrc_spec:
+  compute:
+    matrix: [Matmul, Conv, ConvTranspose]
+    vector: [Add, ArgMax, AveragePool,
+             BatchNormalization,
+             Cast, Clip, Concat, Constant, Cos,
+             Div, Dropout,
+             Exp,
+             Flatten,
+             Gather, Gelu,
+             Hardswish,
+             Identity,
+             LayerNormalization, LeakyRelu, Log,
+             MaxPool, Mean, Mul,
+             Neg, NonMaxSuppression,
+             Pad, Permute, Pow,
+             Reciprocal, ReduceMax, ReduceSum, Relu, Reshape, Resize,
+             Shape, Sigmoid, Sin, Slice, Softmax, Softplus, Split, Sqrt, Squeeze, Sub, Sum,
+             Tanh, Tile, TorchGather, Transpose, Trilu,
+             Unsqueeze,
+             VoxelPooling,
+             Where]

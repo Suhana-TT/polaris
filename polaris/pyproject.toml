@@ -1,0 +1,66 @@
+[tool.pytest.ini_options]
+markers = [
+    "unit: unit tests",
+    "opunit: unit tests for operators",
+    "slow: slow tests",
+    "tools_secondary: Tests for secondary tools",
+    "integration: integration tests",
+]
+testpaths = ["tests"]
+pythonpath = "."
+addopts = "--durations=0"
+
+[tool.mypy]
+check_untyped_defs = true
+explicit_package_bases = true
+exclude = "^__.*/|^tests/|ttsim/back/tensix_neo|ttsim/front/llk"
+# disallow_untyped_calls = true
+# disallow_untyped_defs = true
+warn_unreachable = true
+allow_untyped_globals = true
+
+[tool.coverage.run]
+branch = true
+omit = ["tests/*"]
+parallel = true    # Enable data collection from sub-processes called through tests
+
+[tool.coverage.report]
+# Regexes for lines to exclude from consideration
+exclude_also = [
+    # Don't complain about missing debug-only code:
+    "def __repr__",
+    "if self\\.debug",
+    "if DEBUG",
+
+    # Don't complain about TYPE_CHECKING code
+    "if TYPE_CHECKING",
+
+    # Don't complain if tests don't hit defensive assertion code:
+    "raise AssertionError",
+    "raise NotImplementedError",
+
+    # Don't complain if non-runnable code isn't run:
+    "if 0:",
+    "if __name__ == .__main__.:",
+    ]
+[tool.coverage.html]
+# Output directory, prefix __ to ensure it is ignored by .gitignore
+directory = "__htmlcov"
+
+[tool.isort]
+force_to_top = ["sys" , "os"]
+honor_noqa = true
+line_length = 120
+
+[tool.ruff]
+line-length = 120
+indent-width = 4
+
+[tool.ruff.format]
+quote-style = "single"
+skip-magic-trailing-comma = true    # Avoid always splitting function arguments (in definitions) one per line
+
+[tool.ruff.lint]
+# By default, Ruff enables Pyflakes (F) and a subset of pycodestyle (E) codes.
+# You can extend this selection.
+extend-select = ["W291", "W293"]
