@@ -18,7 +18,6 @@ def conv3x3(name, in_planes, out_planes, stride=1):
         bias=False,
     )
 
-
 class BasicBlock(SimNN.Module):
     expansion = 1
 
@@ -48,9 +47,7 @@ class BasicBlock(SimNN.Module):
             bias=False,
         )
         self.bn2 = F.BatchNorm2d(f"{self.name}_bn2", planes)
-
         self.relu3 = F.Relu(f"{self.name}_relu3")
-        
         self.downsample = downsample
         self.stride     = stride
 
@@ -62,7 +59,7 @@ class BasicBlock(SimNN.Module):
         out = self.conv1(x)
         out = self.bn1(out)
         out = self.relu1(out)
-
+        
         out = self.conv2(out)
         out = self.bn2(out)
 
@@ -73,7 +70,6 @@ class BasicBlock(SimNN.Module):
         out = self.relu3(out)
         return out
     
-
 class Bottleneck(SimNN.Module):
     expansion = 4
 
@@ -98,7 +94,6 @@ class Bottleneck(SimNN.Module):
             f"{self.name}_conv3",planes,planes * Bottleneck.expansion,kernel_size=1,stride=1,padding=0,bias=False,
         )
         self.bn3  = F.BatchNorm2d(f"{self.name}_bn3", planes * Bottleneck.expansion)
-        
         self.relu_res = F.Relu(f"{self.name}_relu_res")
         self.downsample = downsample
         self.stride     = stride
@@ -124,7 +119,6 @@ class Bottleneck(SimNN.Module):
         out = out + residual
         return self.relu_res(out)
     
-
 class Downsample(SimNN.Module):
     def __init__(self, objname, inplanes, outplanes, stride):
         super().__init__()
@@ -214,38 +208,17 @@ class ClipBoxes(SimNN.Module):
         self.name = objname
         self.max_x = max_x
         self.max_y = max_y
-        # Added mandatory registration call
         super().link_op2module()
 
     def __call__(self, boxes, img):
         boxes.link_module = self
         max_x = self.max_x
         max_y = self.max_y
-        if (max_x is None or max_y is None) and hasattr(img, "shape"):
-            shape = img.shape
-            try:
-                # Use the last two dimensions as (height, width) when possible.
-                if isinstance(shape, (tuple, list)) and len(shape) >= 2:
-                    height = float(shape[-2])
-                    width = float(shape[-1])
-                    if max_x is None:
-                        max_x = width - 1.0
-                    if max_y is None:
-                        max_y = height - 1.0
-            except (TypeError, ValueError):
-                # If shape values cannot be interpreted as numeric dimensions,
-                # ignore the error and fall back to hardcoded defaults below.
-                pass
-        if max_x is None:
-            max_x = 607.0
-        if max_y is None:
-            max_y = 607.0
         
         b_list = F.Split(f"{self.name}_b_split_clip", axis=2, count=4)(boxes)
         bx1, by1, bx2, by2 = b_list[0], b_list[1], b_list[2], b_list[3]
         for b in [bx1, by1, bx2, by2]:
             b.link_module = self
-        
         px1 = F.Clip(f"{self.name}_clip_x1", min=0.0, max=max_x)(bx1)
         py1 = F.Clip(f"{self.name}_clip_y1", min=0.0, max=max_y)(by1)
         px2 = F.Clip(f"{self.name}_clip_x2", min=0.0, max=max_x)(bx2)

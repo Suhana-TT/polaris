@@ -3,6 +3,52 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import numpy as np
+import ttsim.front.functional.sim_nn as SimNN
+
+class Anchors(SimNN.Module):
+    def __init__(self, objname, pyramid_levels=None, strides=None, sizes=None, ratios=None, scales=None):
+        super().__init__()
+        self.name = objname
+
+        if pyramid_levels is None:
+            self.pyramid_levels = [3, 4, 5, 6, 7]
+        else:
+            self.pyramid_levels = pyramid_levels
+
+        if strides is None:
+            self.strides = [2 ** x for x in self.pyramid_levels]
+        else:
+            self.strides = strides
+
+        if sizes is None:
+            self.sizes = [2 ** (x + 2) for x in self.pyramid_levels]
+        else:
+            self.sizes = sizes
+
+        if ratios is None:
+            self.ratios = np.array([0.5, 1, 2], dtype=np.float32)
+        else:
+            self.ratios = np.array(ratios, dtype=np.float32)
+
+        if scales is None:
+            self.scales = np.array([2 ** 0, 2 ** (1.0 / 3.0), 2 ** (2.0 / 3.0)], dtype=np.float32)
+        else:
+            self.scales = np.array(scales, dtype=np.float32)
+
+        super().link_op2module()
+
+    def __call__(self, image_h, image_w):
+        image_shape_hw = (image_h, image_w)
+        anchors = anchors_for_shape(
+            image_shape_hw,
+            pyramid_levels=self.pyramid_levels,
+            ratios=self.ratios,
+            scales=self.scales,
+            strides=self.strides,
+            sizes=self.sizes,
+        )
+        return anchors.reshape(1, -1, 4)
+    
 
 def generate_anchors(base_size=16, ratios=None, scales=None):
 
@@ -16,20 +62,15 @@ def generate_anchors(base_size=16, ratios=None, scales=None):
 
     num_anchors = len(ratios) * len(scales)
 
-    # initialize anchors [num_anchors, 4]
     anchors = np.zeros((num_anchors, 4), dtype=np.float32)
 
-    # scale base_size
     anchors[:, 2:] = base_size * np.tile(scales, (2, len(ratios))).T
 
-    # compute areas
     areas = anchors[:, 2] * anchors[:, 3]
 
-    # correct for aspect ratios
     anchors[:, 2] = np.sqrt(areas / np.repeat(ratios, len(scales)))
     anchors[:, 3] = anchors[:, 2] * np.repeat(ratios, len(scales))
 
-    # (x_ctr,y_ctr,w,h) -> (x1,y1,x2,y2) with center at (0,0)
     anchors[:, 0::2] -= np.tile(anchors[:, 2] * 0.5, (2, 1)).T
     anchors[:, 1::2] -= np.tile(anchors[:, 3] * 0.5, (2, 1)).T
 
@@ -110,55 +151,3 @@ def anchors_for_shape(
 
     return all_anchors  # [A,4]
 
-class AnchorsPolaris:
-
-    def __init__(self,
-                 pyramid_levels=None,
-                 strides=None,
-                 sizes=None,
-                 ratios=None,
-                 scales=None):
-        if pyramid_levels is None:
-            self.pyramid_levels = [3, 4, 5, 6, 7]
-        else:
-            self.pyramid_levels = pyramid_levels
-
-        if strides is None:
-            self.strides = [2 ** p for p in self.pyramid_levels]
-        else:
-            self.strides = strides
-
-        if sizes is None:
-            self.sizes = [2 ** (p + 2) for p in self.pyramid_levels]
-        else:
-            self.sizes = sizes
-
-        if ratios is None:
-            self.ratios = np.array([0.5, 1.0, 2.0], dtype=np.float32)
-        else:
-            self.ratios = np.array(ratios, dtype=np.float32)
-
-        if scales is None:
-            self.scales = np.array([2 ** 0,
-                                    2 ** (1.0 / 3.0),
-                                    2 ** (2.0 / 3.0)], dtype=np.float32)
-        else:
-            self.scales = np.array(scales, dtype=np.float32)
-
-    def __call__(self, image_h, image_w):
-        """
-        Generate anchors for an image of size (image_h, image_w).
-
-        Returns:
-            anchors_np: numpy array of shape [1, A, 4]
-        """
-        image_shape_hw = (image_h, image_w)
-        anchors = anchors_for_shape(
-            image_shape_hw,
-            pyramid_levels=self.pyramid_levels,
-            ratios=self.ratios,
-            scales=self.scales,
-            strides=self.strides,
-            sizes=self.sizes,
-        )
-        return anchors.reshape(1, -1, 4)

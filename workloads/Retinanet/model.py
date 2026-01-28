@@ -7,7 +7,7 @@ import os, sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
 import ttsim.front.functional.op as F
 import ttsim.front.functional.sim_nn as SimNN
-from workloads.Retinanet.anchor import AnchorsPolaris 
+from workloads.Retinanet.anchor import Anchors
 from typing import Type, Union
 
 from workloads.Retinanet.utils import BasicBlock, Bottleneck, Downsample, BBoxTransform, ClipBoxes
@@ -17,78 +17,51 @@ class PyramidFeatures(SimNN.Module):
         super().__init__()
         self.name = objname
 
-        # P5: upsample C5 to get P5
-        self.P5_1 = F.Conv2d(
-            f"{self.name}_P5_1", C5_size, feature_size, kernel_size=1, stride=1, padding=0, bias=False,
-        )
-        # self.P5_upsampled = F.Upsample(
-        #     f"{self.name}_P5_upsample",scale_factor=2,mode="nearest",
-        # )
-        self.P5_2 = F.Conv2d(
-            f"{self.name}_P5_2", feature_size, feature_size, kernel_size=3, stride=1, padding=1, bias=False,
-        )
+        self.P5_upsampled = F.Upsample(f"{self.name}_P5_upsample", scale_factor=2, mode="nearest")
+        self.P4_upsampled = F.Upsample(f"{self.name}_P4_upsample", scale_factor=2, mode="nearest")
 
-        # P4: add P5 (upsampled) elementwise to C4
-        self.P4_1 = F.Conv2d(
-            f"{self.name}_P4_1", C4_size, feature_size, kernel_size=1, stride=1, padding=0, bias=False,
-        )
-        # self.P4_upsampled = F.Upsample(
-        #     f"{self.name}_P4_upsample",scale_factor=2,mode="nearest",
-        # )
-        self.P4_2 = F.Conv2d(
-            f"{self.name}_P4_2",feature_size, feature_size, kernel_size=3, stride=1, padding=1, bias=False,
-        )
+        self.P5_upsampled.ipos = [0, 1]
+        self.P4_upsampled.ipos = [0, 1]
 
-        # P3: add P4 (upsampled) elementwise to C3
-        self.P3_1 = F.Conv2d(
-            f"{self.name}_P3_1", C3_size, feature_size, kernel_size=1, stride=1, padding=0, bias=False,
-        )
-        self.P3_2 = F.Conv2d(
-            f"{self.name}_P3_2", feature_size, feature_size, kernel_size=3, stride=1, padding=1, bias=False,
-        )
-
-        # P6: 3×3 stride‑2 conv on C5
-        self.P6 = F.Conv2d(
-            f"{self.name}_P6", C5_size, feature_size, kernel_size=3, stride=2, padding=1, bias=False,
-        )
-
-        # P7: ReLU then 3×3 stride‑2 conv on P6
+        self.P5_1 = F.Conv2d(f"{self.name}_P5_1", C5_size, feature_size, kernel_size=1, stride=1, padding=0, bias=False)
+        self.P5_2 = F.Conv2d(f"{self.name}_P5_2", feature_size, feature_size, kernel_size=3, stride=1, padding=1, bias=False)
+        self.P4_1 = F.Conv2d(f"{self.name}_P4_1", C4_size, feature_size, kernel_size=1, stride=1, padding=0, bias=False)
+        self.P4_2 = F.Conv2d(f"{self.name}_P4_2", feature_size, feature_size, kernel_size=3, stride=1, padding=1, bias=False)
+        self.P3_1 = F.Conv2d(f"{self.name}_P3_1", C3_size, feature_size, kernel_size=1, stride=1, padding=0, bias=False)
+        self.P3_2 = F.Conv2d(f"{self.name}_P3_2", feature_size, feature_size, kernel_size=3, stride=1, padding=1, bias=False)
+        self.P6 = F.Conv2d(f"{self.name}_P6", C5_size, feature_size, kernel_size=3, stride=2, padding=1, bias=False)
         self.P7_1 = F.Relu(f"{self.name}_P7_relu")
-        self.P7_2 = F.Conv2d(
-            f"{self.name}_P7_2", feature_size, feature_size, kernel_size=3, stride=2, padding=1, bias=False,
-        )
+        self.P7_2 = F.Conv2d(f"{self.name}_P7_2", feature_size, feature_size, kernel_size=3, stride=2, padding=1, bias=False)
+        
         super().link_op2module()
 
     def __call__(self, inputs):
         C3, C4, C5 = inputs
 
-    # P5
-        P5_x = self.P5_1(C5)
-        P5_upsampled_x = P5_x.interpolate(scale_factor=2.0, mode="nearest")  # type: ignore[attr-defined]
-        self._tensors[P5_upsampled_x.name] = P5_upsampled_x
-        P5_x = self.P5_2(P5_x)
+        # P5
+        p5_x = self.P5_1(C5)
+        # Now this will accept 2 inputs and pass the hardware assertion
+        p5_upsampled_x = self.P5_upsampled(p5_x, C4) 
+        p5_out = self.P5_2(p5_x)
 
-    # P4
-        P4_x = self.P4_1(C4)
-        P4_x = P4_x + P5_upsampled_x
-        P4_upsampled_x = P4_x.interpolate(scale_factor=2.0, mode="nearest")  # type: ignore[attr-defined]
-        self._tensors[P4_upsampled_x.name] = P4_upsampled_x
-        P4_x = self.P4_2(P4_x)
+        # P4
+        p4_x = self.P4_1(C4)
+        p4_x = p4_x + p5_upsampled_x
+        p4_upsampled_x = self.P4_upsampled(p4_x, C3) 
+        p4_out = self.P4_2(p4_x)
 
-    # P3
-        P3_x = self.P3_1(C3)
-        P3_x = P3_x + P4_upsampled_x
-        P3_x = self.P3_2(P3_x)
+        # P3
+        p3_x = self.P3_1(C3)
+        p3_x = p3_x + p4_upsampled_x
+        p3_out = self.P3_2(p3_x)
 
-    # P6, P7 same as before
-        P6_x = self.P6(C5)
+        # P6 & P7
+        p6_out = self.P6(C5)
+        p7_out = self.P7_1(p6_out)
+        p7_out = self.P7_2(p7_out)
 
-        P7_x = self.P7_1(P6_x)
-        P7_x = self.P7_2(P7_x)
-
-        return [P3_x, P4_x, P5_x, P6_x, P7_x]
-
-
+        return [p3_out, p4_out, p5_out, p6_out, p7_out]
+    
 class RegressionModel(SimNN.Module):
     def __init__(self, objname, num_features_in, num_anchors=9, feature_size=256):
         super().__init__()
@@ -134,8 +107,6 @@ class RegressionModel(SimNN.Module):
 
         return out.view(b, -1, 4)
     
-
-
 class ClassificationModel(SimNN.Module):
     def __init__(self, objname, num_features_in, num_anchors=9, num_classes=80, feature_size=256):
         super().__init__()
@@ -207,7 +178,6 @@ class ResNet(SimNN.Module):
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2)
 
         super().link_op2module()
- 
     def _make_layer(self, block, planes, blocks, stride=1):
         layers = []
 
@@ -246,7 +216,6 @@ class ResNet(SimNN.Module):
         for module in layer_list:
             x = module(x)
         return x
-    
     def forward(self, x):
         x = self.conv1(x)
         x = self.bn1(x)
@@ -259,7 +228,6 @@ class ResNet(SimNN.Module):
         C5 = self._run_layer(self.layer4, C4)
 
         return C3, C4, C5
-    
 class RetinaNet(SimNN.Module):
     def __init__(self, objname, cfg):
         super().__init__()
@@ -271,7 +239,7 @@ class RetinaNet(SimNN.Module):
         block: Type[Union[BasicBlock, Bottleneck]] 
         layers: list[int]
 
-        # Updated workloads/Retinanet/model.py
+         # Select ResNet block type, layer configuration, and C3/C4/C5 feature sizes based on resnet_depth.
         if depth == 18:
             block, layers = BasicBlock, [2, 2, 2, 2]
             C3_size, C4_size, C5_size = 128, 256, 512
@@ -297,8 +265,8 @@ class RetinaNet(SimNN.Module):
         self.fpn      = PyramidFeatures(f"{self.name}_fpn", C3_size, C4_size, C5_size)
         self.regressionModel = RegressionModel(f"{self.name}_reg", 256)
         self.classificationModel = ClassificationModel(f"{self.name}_cls", 256, num_classes=self.num_classes)
-        
-        self.anchors      = AnchorsPolaris() # Assuming this is your torch-free class
+            
+        self.anchors = Anchors(f"{self.name}_anchors") 
         
         self.regressBoxes = BBoxTransform(f"{self.name}_bbox_trans")
         
@@ -312,7 +280,6 @@ class RetinaNet(SimNN.Module):
         }
 
     def __call__(self, x):
-       
         C3, C4, C5 = self.backbone.forward(x)
         features   = self.fpn([C3, C4, C5])
 
@@ -332,26 +299,22 @@ class RetinaNet(SimNN.Module):
 
         return classification, regression, final_bbox_coords
 
-    
 def resnet18_backbone(objname):
-        # ResNet‑18: BasicBlock, [2,2,2,2]
+    # ResNet‑18: BasicBlock, [2,2,2,2]
     return ResNet(objname, BasicBlock, [2, 2, 2, 2])
 
 def resnet34_backbone(objname):
-        # ResNet‑34: BasicBlock, [3,4,6,3]
+    # ResNet‑34: BasicBlock, [3,4,6,3]
     return ResNet(objname, BasicBlock, [3, 4, 6, 3])
 
 def resnet50_backbone(objname):
-        # ResNet‑50: Bottleneck, [3,4,6,3]
+    # ResNet‑50: Bottleneck, [3,4,6,3]
     return ResNet(objname, Bottleneck, [3, 4, 6, 3])
 
 def resnet101_backbone(objname):
-        # ResNet‑101: Bottleneck, [3,4,23,3]
+    # ResNet‑101: Bottleneck, [3,4,23,3]
     return ResNet(objname, Bottleneck, [3, 4, 23, 3])
 
 def resnet152_backbone(objname):
-        # ResNet‑152: Bottleneck, [3,8,36,3]
+    # ResNet‑152: Bottleneck, [3,8,36,3]
     return ResNet(objname, Bottleneck, [3, 8, 36, 3])
-    
-
-
