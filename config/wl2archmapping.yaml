@@ -58,4 +58,5 @@ op_rsrc_spec:
              Tanh, Tile, TorchGather, Transpose, Trilu,
              Unsqueeze,
              VoxelPooling,
+             UPSAMPLE,
              Where]

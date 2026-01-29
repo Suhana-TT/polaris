@@ -32,7 +32,6 @@ workloads:
       rn50_b1_hd : { img_height: 1024, img_width: 1024 }
       rn50_b1_uhd: { img_height: 2828, img_width: 2828 }
 
-  # generate resnet50.onnx using code in workloads/onnx/examples/:
   - api: ONNX
     name: RESNET50
     basedir: workloads
@@ -216,3 +215,11 @@ workloads:
     module : SDModel@stablediffusion.py
     instances:
       sd_b1 : {bs: 1}
+
+  - api: TTSIM
+    name: RetinaNet
+    basedir: workloads/Retinanet
+    module : RetinaNet@model.py
+    params : {num_classes: 80, img_size: 608, resnet_depth: 50}
+    instances:
+      retinanet_rn50_608: { bs: 1 }
