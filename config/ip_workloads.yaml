@@ -272,3 +272,11 @@ workloads:
     module : SDModel@stablediffusion.py
     instances:
       sd_b1 : {bs: 1}
+
+  - api: TTSIM
+    name: RetinaNet
+    basedir: workloads/Retinanet
+    module : RetinaNet@model.py
+    params : {num_classes: 80, img_size: 608, resnet_depth: 50}
+    instances:
+      retinanet_rn50_608: {bs: 1}
