@@ -5,14 +5,11 @@
 import os, sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
 import ttsim.front.ttnn as ttnn
-from workloads.ttnn.llama3.model import Transformer
-from workloads.ttnn.llama3.model_config import ModelArgs
+from workloads.ttnn.tt_transformers.model import Transformer
+from workloads.ttnn.tt_transformers.model_config import ModelArgs
 from ttsim.front.ttnn.device import Device as TTNNDevice
 from loguru import logger
 from ttsim.utils.common import setup_logger
-
-# def filter_ttnn_attrs(attrs_dict):
-#     return {k: v for k, v in attrs_dict.items() if not (isinstance(v, ttnn.Tensor) or k == "layout" or k == "memory_config")}
 
 def run_llama3(wlname: str, ttnn_device: TTNNDevice, cfg: dict):
     assert isinstance(ttnn_device, TTNNDevice), "ttnn_device must be a TTNNDevice"
@@ -56,7 +53,7 @@ def run_llama3(wlname: str, ttnn_device: TTNNDevice, cfg: dict):
 
     if layers is not None:
         model_args.n_layers = layers
-    state_dict = None #model_args.load_state_dict()
+    state_dict = None
 
     prompts = ["This is a test"] * model_args.max_batch_size
     encoded_prompts = [128000]
@@ -71,7 +68,7 @@ def run_llama3(wlname: str, ttnn_device: TTNNDevice, cfg: dict):
         mesh_device=ttnn_device,
         dtype=dtype,
         state_dict=state_dict,
-        weight_cache_path=None, #model_args.weight_cache_path(dtype),
+        weight_cache_path=None,
         paged_attention_config=paged_attention_config,
     )
     logger.info("Model and caches loaded.")

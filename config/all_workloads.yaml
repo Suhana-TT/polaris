@@ -171,3 +171,31 @@ workloads:
     instances:
       vit_b16: { bs: 1, model_name: vit-b16 }
       vit_base_224x224: { bs: 1, model_name: vit-b16 }
+
+  - api: TTNN
+    name: mistral_decode
+    basedir: workloads/ttnn/mistral
+    module : test_model_inference@test_model.py
+    instances:
+      mistral_7b_decode: { bs: 1, model_name: Mistral-7B }
+
+  - api: TTNN
+    name: mistral_prefill
+    basedir: workloads/ttnn/mistral
+    module : test_model_paged_prefill@test_model_prefill.py
+    instances:
+      mistral_7b_prefill: { bs: 1, model_name: Mistral-7B }
+
+  - api: TTNN
+    name: qwen2.5_decode
+    basedir: workloads/ttnn/qwen2.5
+    module : test_model_inference_qwen@test_model.py
+    instances:
+      qwen2.5_7b_decode: { bs: 1, model_name: Qwen2.5-7B }
+
+  - api: TTNN
+    name: qwen2.5_prefill
+    basedir: workloads/ttnn/qwen2.5
+    module : test_model_full_prefill_qwen@test_model_prefill.py
+    instances:
+      qwen2.5_7b_prefill: { bs: 1, model_name: Qwen2.5-7B }

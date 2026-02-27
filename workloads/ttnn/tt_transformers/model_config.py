@@ -9,41 +9,67 @@ import ttsim.front.ttnn as ttnn
 class ModelArgs:
     def __init__(self, mesh_device, model_name="llama3-8B", max_batch_size=1, max_seq_len=256, instruct=False, dummy_weights=False):
         self.mesh_device = mesh_device
-        if model_name == "llama3-8B":
+
+        # Make the check completely case-insensitive
+        name_lower = model_name.lower()
+
+        # 1. Standard defaults that apply to ALMOST all models
+        self.head_dim = 128
+        self.n_kv_heads = 8
+        self.norm_eps = 1e-5
+        self.vocab_size = 128256
+        self.n_layers = 1
+        self.hidden_size = None # Prevent missing attribute errors
+        self.dim = None         # Prevent missing attribute errors
+
+        # 2. Model-Specific Overrides
+        if "llama3-8b" in name_lower:
             self.model_name = "llama3-8B"
-            self.dim = 4096 # llama3 8B
-            self.n_heads = 32 # llama3 8B
-            self.head_dim = 128
-        elif model_name == "llama3-3B":
+            self.dim = 4096
+            self.n_heads = 32
+        elif "llama3-3b" in name_lower:
             self.model_name = "llama3-3B"
-            self.dim = 3072 # llama3 3B
-            self.n_heads = 24 # llama3 3B
-            self.head_dim = 128
-        elif model_name == "llama3-1B":
+            self.dim = 3072
+            self.n_heads = 24
+        elif "llama3-1b" in name_lower:
             self.model_name = "llama3-1B"
-            self.dim = 2048 # llama3 1B
-            self.n_heads = 32 # llama3 1B
+            self.dim = 2048
+            self.n_heads = 32
             self.head_dim = 64
-        elif model_name == "llama3-70B":
+        elif "llama3-70b" in name_lower:
             self.model_name = "llama3-70B"
             self.dim = 8192
             self.n_heads = 64
-            self.head_dim = 128
+        elif "mistral" in name_lower:
+            self.model_name = "mistral-7B"
+            self.dim = 4096
+            self.n_heads = 32
+            self.n_kv_heads = 8
+            self.vocab_size = 32000
+            self.norm_eps = 1e-5
+            self.hidden_size = 4096
+        elif "qwen" in name_lower:
+            self.model_name = "qwen2.5-7B"
+            self.dim = 3584
+            self.n_heads = 28
+            self.n_kv_heads = 4
+            self.vocab_size = 152064
+            self.norm_eps = 1e-6
+            self.hidden_size = 3584
 
-        self.n_kv_heads = 8 # llama3 8B and llama3 3B and llama3 1B and llama3 70B
+        # 3. Simulator/General Settings
         self.rms_norm_add_unit_offset = False
         self.num_devices = 1
         self.max_batch_size = max_batch_size
         self.num_reduce_scatter_links = 1
         self.arch_name = ttnn.get_arch_name()
-        self.n_layers = 1
-        self.compute_kernel_config_hifi2=ttnn.MathFidelity.HiFi2
-        self.compute_kernel_config_hifi2_fp16=ttnn.MathFidelity.HiFi2
-        self.compute_kernel_config_hifi4=ttnn.MathFidelity.HiFi4
+        self.compute_kernel_config_hifi2 = ttnn.MathFidelity.HiFi2
+        self.compute_kernel_config_hifi2_fp16 = ttnn.MathFidelity.HiFi2
+        self.compute_kernel_config_hifi4 = ttnn.MathFidelity.HiFi4
         self.max_grid_size = ttnn.CoreGrid([ttnn.CoreRange(ttnn.CoreCoord(0,0), ttnn.CoreCoord(7,7))])
         self.MAX_QKV_MM_SEQ_LEN = 2048
         self.num_all_gather_links = 1
-        self.instruct=instruct
+        self.instruct = instruct
         self.qkv_size = 5120
         self.ccl_dtype = ttnn.bfloat8_b
         self.tile_size = 32
@@ -51,16 +77,14 @@ class ModelArgs:
         self.max_seq_len = max_seq_len
         self.rope_scaling_factor = None
         self.orig_context_len = None
-        self.rope_theta = 500000.0
+        self.rope_theta = 1000000.0 if "qwen" in name_lower else 500000.0
         self.model_config = None
         self.is_multichip = False
         self.dummy_weights = True
         self.cluster_shape = [1,1]
         self.query_pre_attn_scalar = None
         self.is_galaxy = False
-        self.norm_eps = 1e-5
         self.is_distributed_norm = False
-        self.vocab_size = 128256
         self.padded_vocab_size = None
         self.checkpoint_type = "simulation"
         self.WEIGHTS_DTYPE = ttnn.bfloat8_b
@@ -80,7 +104,7 @@ class ModelArgs:
         return x
     
     def is_vision(self):
-        return False # llama3 3B
+        return False
     
     def is_simulation(self):
         return True

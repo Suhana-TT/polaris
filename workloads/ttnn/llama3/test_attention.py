@@ -8,9 +8,9 @@ from numpy import shape
 from loguru import logger
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
 import ttsim.front.ttnn as ttnn
-from workloads.ttnn.llama3.attention import Attention
-from workloads.ttnn.llama3.rope import RotarySetup, precompute_freqs
-from workloads.ttnn.llama3.model_config import ModelArgs
+from workloads.ttnn.tt_transformers.attention import Attention
+from workloads.ttnn.tt_transformers.rope import RotarySetup, precompute_freqs
+from workloads.ttnn.tt_transformers.model_config import ModelArgs
 
 def filter_ttnn_attrs(attrs_dict):
     return {k: v for k, v in attrs_dict.items() if not (isinstance(v, ttnn.Tensor) or k == "layout" or k == "memory_config")}

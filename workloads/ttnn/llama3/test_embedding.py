@@ -5,8 +5,8 @@
 import os, sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
 import ttsim.front.ttnn as ttnn
-from workloads.ttnn.llama3.embedding import Embedding
-from workloads.ttnn.llama3.model_config import ModelArgs
+from workloads.ttnn.tt_transformers.embedding import Embedding
+from workloads.ttnn.tt_transformers.model_config import ModelArgs
 
 def test_embedding():
     dtype = ttnn.bfloat16

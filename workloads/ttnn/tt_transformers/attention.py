@@ -8,7 +8,7 @@ import os, sys
 from ttsim.front.ttnn.tensor import DataType
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
 import ttsim.front.ttnn as ttnn
-import workloads.ttnn.llama3.utils as utils
+import workloads.ttnn.tt_transformers.utils as utils
 
 def tt_all_reduce(tensor, *args, **kwargs):
     return tensor

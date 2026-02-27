@@ -5,7 +5,7 @@
 import os, sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
 import ttsim.front.ttnn as ttnn
-from workloads.ttnn.llama3.rope import RotarySetup
+from workloads.ttnn.tt_transformers.rope import RotarySetup
 
 def filter_ttnn_attrs(attrs_dict):
     return {k: v for k, v in attrs_dict.items() if not (isinstance(v, ttnn.Tensor) or k == "layout" or k == "memory_config")}

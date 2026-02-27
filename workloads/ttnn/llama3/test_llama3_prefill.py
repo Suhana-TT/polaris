@@ -6,8 +6,8 @@ from loguru import logger
 import os, sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
 import ttsim.front.ttnn as ttnn
-from workloads.ttnn.llama3.model import Transformer
-from workloads.ttnn.llama3.model_config import ModelArgs
+from workloads.ttnn.tt_transformers.model import Transformer
+from workloads.ttnn.tt_transformers.model_config import ModelArgs
 from ttsim.front.ttnn.device import Device as TTNNDevice
 
 def run_llama3(wlname: str, ttnn_device: TTNNDevice, cfg: dict):
@@ -64,8 +64,7 @@ def run_llama3(wlname: str, ttnn_device: TTNNDevice, cfg: dict):
     )
 
     encoded_prompt_tensor = ttnn._rand(shape=[batch_size, seq_len], device=ttnn_device, dtype=ttnn.int32)
-    print(f'encoded prompt tensor shape is {encoded_prompt_tensor.shape}')
-    # tt_prefill_input = encoded_prompt_tensor.unsqueeze(0)
+    logger.info(f'encoded prompt tensor shape is {encoded_prompt_tensor.shape}')
     tt_prefill_input = encoded_prompt_tensor
     tt_prefill_input = ttnn.reshape(tt_prefill_input, (1, 1, 1, -1))
 
@@ -82,7 +81,6 @@ def run_llama3(wlname: str, ttnn_device: TTNNDevice, cfg: dict):
     tokens_embd = model.embd(tt_prefill_input)
     tokens_embd = tokens_embd.squeeze(0)
 
-    #print(f'tokens_embd shape is {tokens_embd.shape}')
     tt_output_torch = model.ttnn_prefill_forward(
         tokens_embd,
         rot_mats=tt_rot_mats_prefill,
