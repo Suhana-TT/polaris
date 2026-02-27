@@ -14,12 +14,15 @@ class Embedding():
         weight_cache_path,
         state_dict,
         dtype,
-        dim = 3072,
+        dim=None,
     ):
         super().__init__()
         self.state_dict = state_dict
         self.mesh_device = mesh_device
-        weight = ttnn._rand(shape=(128256, dim), device=mesh_device, dtype=dtype)
+        if dim is None:
+            dim = args.dim
+
+        weight = ttnn._rand(shape=(args.vocab_size, dim), device=mesh_device, dtype=dtype)
         torch_weight = weight #.unsqueeze(0).unsqueeze(0)
         self.weights = ttnn.as_tensor(
             torch_weight,

@@ -6,9 +6,9 @@ import os, sys
 from numpy import shape
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
 import ttsim.front.ttnn as ttnn
-from workloads.ttnn.llama3.attention import Attention
-from workloads.ttnn.llama3.mlp import MLP
-from workloads.ttnn.llama3.rmsnorm import RMSNorm
+from workloads.ttnn.tt_transformers.attention import Attention
+from workloads.ttnn.tt_transformers.mlp import MLP
+from workloads.ttnn.tt_transformers.rmsnorm import RMSNorm
 
 class TransformerBlock():
     def __init__(

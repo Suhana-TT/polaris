@@ -6,7 +6,7 @@ import os, sys
 from ttsim.front.ttnn.tensor import DataType
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
 import ttsim.front.ttnn as ttnn
-from workloads.ttnn.llama3.attention import tt_all_reduce
+from workloads.ttnn.tt_transformers.attention import tt_all_reduce
 
 def pad_to_size(tensor, dim, size):
     """Pads the tensor to the specified size along the given dimension."""

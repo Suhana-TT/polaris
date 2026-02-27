@@ -6,11 +6,11 @@ import os, sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
 import ttsim.front.ttnn as ttnn
 from loguru import logger
-from workloads.ttnn.llama3.rmsnorm import RMSNorm
-from workloads.ttnn.llama3.decoder import TransformerBlock
-from workloads.ttnn.llama3.embedding import Embedding
-from workloads.ttnn.llama3.lm_head import LMHead
-from workloads.ttnn.llama3.rope import RotarySetup
+from workloads.ttnn.tt_transformers.rmsnorm import RMSNorm
+from workloads.ttnn.tt_transformers.decoder import TransformerBlock
+from workloads.ttnn.tt_transformers.embedding import Embedding
+from workloads.ttnn.tt_transformers.lm_head import LMHead
+from workloads.ttnn.tt_transformers.rope import RotarySetup
 
 def copy_host_to_device(tensor, device):
     if tensor.device != device:

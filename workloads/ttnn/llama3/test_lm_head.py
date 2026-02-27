@@ -6,8 +6,8 @@ import os, sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
 from loguru import logger
 import ttsim.front.ttnn as ttnn
-from workloads.ttnn.llama3.lm_head import LMHead
-from workloads.ttnn.llama3.model_config import ModelArgs
+from workloads.ttnn.tt_transformers.lm_head import LMHead
+from workloads.ttnn.tt_transformers.model_config import ModelArgs
 
 def test_lm_head_inference():
     seq_len = 32

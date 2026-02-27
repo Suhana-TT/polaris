@@ -5,14 +5,15 @@
 import os, sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
 import ttsim.front.ttnn as ttnn
-from workloads.ttnn.llama3.attention import Attention
-from workloads.ttnn.llama3.rope import get_prefill_rot_mat, get_rot_transformation_mat
-from workloads.ttnn.llama3.model_config import ModelArgs
+from workloads.ttnn.tt_transformers.attention import Attention
+from workloads.ttnn.tt_transformers.rope import get_prefill_rot_mat, get_rot_transformation_mat
+from workloads.ttnn.tt_transformers.model_config import ModelArgs
 from loguru import logger
 
 def test_attention_inference():
     mesh_device = ttnn.open_device(device_id=0)#, device_type="ttnn", device_name=None)
     max_seq_len = 256
+    seq_len = 256
     paged_attention = False
     page_params = [{"page_block_size": 32, "page_max_num_blocks": 1024}]
     dtype = ttnn.bfloat8_b
@@ -60,7 +61,7 @@ def test_attention_inference():
         paged_attention_config=paged_attention_config,
     )
 
-    attention_input = ttnn._rand((1, 1, 256, model_args.dim), device=mesh_device, dtype=ttnn.bfloat16)
+    attention_input = ttnn._rand((1, 1, seq_len, model_args.dim), device=mesh_device, dtype=ttnn.bfloat16)
 
     tt_out = tt_model(
         attention_input,
@@ -74,11 +75,10 @@ def test_attention_inference():
         tt_out,# mesh_composer=ttnn.ConcatMesh2dToTensor(mesh_device, dims=(1, 3), mesh_shape=model_args.cluster_shape)
     )
 
-    if (tt_out.shape == [1, 1, 256, model_args.dim]):
-        logger.info(f"TT Output shape matches expected: {tt_out.shape} == [1, 1, 256, {model_args.dim}]")
+    if (tt_out.shape == [1, 1, seq_len, model_args.dim]):
+        logger.info(f"TT Output shape matches expected: {tt_out.shape}")
     else:
-        logger.info(f"TT Output shape mismatch: {tt_out.shape} != [1, 1, 256, {model_args.dim}]")
-
+        logger.info(f"TT Output shape mismatch: {tt_out.shape} != [1, 1, {seq_len}, {model_args.dim}]")
     check_kv_cache = False  # set to false for simulation
 
     # logger.info("\nGenerating computation graph...")

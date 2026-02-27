@@ -6,7 +6,7 @@ import os, sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
 import ttsim.front.ttnn as ttnn
 import math
-from workloads.ttnn.llama3.attention import tt_all_reduce
+from workloads.ttnn.tt_transformers.attention import tt_all_reduce
 
 
 class LMHead():
@@ -38,7 +38,7 @@ class LMHead():
         split_sizes = [min(size_per_device, max_columns_per_device)] * (num_splits - 1)
         split_sizes.append(size_per_device - sum(split_sizes))  # remaining columns
         # Split the output weights
-        weights = ttnn._rand(shape=(128256, self.args.dim), device=mesh_device, dtype=dtype)
+        weights = ttnn._rand(shape=(args.vocab_size, self.args.dim), device=mesh_device, dtype=dtype)
         torch_output_weights = ttnn.permute(weights, (1, 0)) #state_dict[f"{state_dict_prefix}output.weight"].permute(1, 0)
 
         self.output_weights = []
