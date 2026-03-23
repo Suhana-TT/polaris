@@ -891,6 +891,7 @@ BinaryCrossEntropyWithLogits = partial(
     BinaryOperator, optype="BinaryCrossEntropyWithLogits"
 )  # added
 Greater = partial(BinaryOperator, optype="Greater")  # added
+GridSample     = partial(BinaryOperator, optype='GridSample')
 
 
 def Cdist(name, x1, x2, p=2.0):

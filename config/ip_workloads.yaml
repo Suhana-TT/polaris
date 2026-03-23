@@ -373,3 +373,21 @@ workloads:
     params : {num_classes: 80, img_size: 608, resnet_depth: 50}
     instances:
       retinanet_rn50_608: {bs: 1}
+
+  - api: TTSIM
+    name: UniAD
+    basedir: workloads/UniAD
+    module : UniAD_E2E@UniAD_E2E.py
+    params :
+      embed_dims    : 256
+      num_query     : 900
+      num_classes   : 10
+      bev_h         : 50
+      bev_w         : 50
+      num_cameras   : 6
+      resnet_depth  : 50
+      num_enc_layers: 6
+      num_heads     : 8
+      ffn_dim       : 512
+    instances:
+      uniad_s : { img_height: 256, img_width: 256, bs: 1 }
