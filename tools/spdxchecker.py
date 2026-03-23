@@ -248,6 +248,10 @@ def analyze_file(filename: str, allowed_licenses: list[str], allowed_copyrights:
         # and does not need SPDX-License-Identifier line as it is the license text itself
         license_status = SPDXHeaderStatus.ST_OK
         copyright_status = SPDXHeaderStatus.ST_OK
+    elif filename.endswith('Dockerfile') or '/Dockerfile' in filename:
+        # Dockerfile is a special case, skip SPDX check
+        license_status = SPDXHeaderStatus.ST_OK
+        copyright_status = SPDXHeaderStatus.ST_OK
     elif lang == 'unknown':
         logger.error(f'File {filename} has unknown extension {ext}. Skipping.')
     else:

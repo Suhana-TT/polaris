@@ -209,3 +209,34 @@ workloads:
     module : test_model_full_prefill_qwen@test_model_prefill.py
     instances:
       qwen2.5_7b_prefill: { bs: 1, model_name: Qwen2.5-7B }
+
+  - api: TTSIM
+    name: UniAD
+    basedir: workloads/UniAD
+    module : UniAD_E2E@UniAD_E2E.py
+    params :
+      embed_dims      : 256
+      num_query       : 900
+      num_classes     : 10
+      bev_h           : 50
+      bev_w           : 50
+      num_cameras     : 6
+      resnet_depth    : 50
+      num_enc_layers  : 6
+      num_heads       : 8
+      ffn_dim         : 512
+      num_dec_layers  : 6
+      predict_steps   : 12
+      num_anchor      : 6
+      n_future        : 4
+      planning_steps  : 6
+      bev_proj_dim    : 64
+      num_occ_classes : 2
+      num_things_classes: 8
+      num_stuff_classes : 2
+      num_dec_things  : 6
+      num_dec_stuff   : 6
+      num_query_things: 300
+      num_query_stuff : 100
+    instances:
+      uniad_full : { img_height: 256, img_width: 256, bs: 1 }
