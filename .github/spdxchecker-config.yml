@@ -34,6 +34,7 @@ allowed_licenses:
 # Allowed copyright holders
 allowed_copyrights:
   - "Tenstorrent AI ULC"
+  - "Tenstorrent USA, Inc."
   - "HuggingFace Inc."
   - "The HuggingFace Team. All rights reserved."
   - "SenseTime. All Rights Reserved"
