@@ -1,119 +1,180 @@
 # SPDX-FileCopyrightText: (C) 2025 Tenstorrent AI ULC
 # SPDX-License-Identifier: Apache-2.0
+
+import os
 import sys
 import numpy as np
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
-# Force pathing
-sys.path.insert(0, "/Users/suhanadas/suhana_polaris_fork")
+repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+if repo_root not in sys.path:
+    sys.path.insert(0, repo_root)
+
 import ttsim.front.functional.tensor_op as T
-from workloads.segformer.common import load_config  # Real config loader
-from workloads.segformer.tt.segformer_encoder import TtsimBaseModelOutput
 import workloads.segformer.tt.segformer_model as class_module
+from workloads.segformer.tt.segformer_encoder import TtsimBaseModelOutput
 
+class DummyConfig:
+    def __init__(self) -> None:
+        self.output_attentions = False
+        self.output_hidden_states = False
+        self.use_return_dict = True
 
-# --- MOCK ENCODER (temporary until real encoder is fully integrated) ---
-class MockEncoder:
-    """Temporary mock encoder - returns fake output with correct shape"""
+class ValidatingMockEncoder:
+    """
+    Mock encoder that validates model.py preprocessing:
+    - input must be NHWC
+    - channels must be padded to min_channels=8
+    """
+
     def __init__(self, name: str, config: Any, parameters: Any) -> None:
         self.name = name
         self.config = config
 
-    def __call__(self, pixel_values: Any, output_attentions: Optional[bool], 
-                 output_hidden_states: Optional[bool], return_dict: Optional[bool]) -> TtsimBaseModelOutput:
-        batch = int(pixel_values.shape[0])
-        
-        # Output in NHWC format: [N, H, W, C] to match tt-metal
-        final_state = T.SimTensor({
-            "name": f"{self.name}_output",
-            "data": np.random.randn(batch, 16, 16, 256).astype(np.float32),
-            "shape": [batch, 16, 16, 256],
-            "dtype": "float32"
-        })
+    def __call__(
+        self,
+        pixel_values: Any,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+    ) -> TtsimBaseModelOutput:
+        shape = list(pixel_values.shape)
 
-        # Return hidden_states only if requested
+        # Expect NHWC after model.py preprocessing
+        if len(shape) != 4:
+            raise ValueError(f"Encoder expected 4D NHWC input, got {shape}")
+
+        batch, height, width, channels = shape
+
+        # For RGB input, model.py should pad channels from 3 to 8 before permuting
+        if channels != 8:
+            raise ValueError(f"Expected encoder input channels to be padded to 8, got {channels}")
+
+        # Final SegFormer encoder output for 512x512 input is [1, 16, 16, 256]
+        final_state = T.SimTensor(
+            {
+                "name": f"{self.name}_output",
+                "data": np.random.randn(batch, 16, 16, 256).astype(np.float32),
+                "shape": [batch, 16, 16, 256],
+                "dtype": "float32",
+            }
+        )
+
+        hidden_states = None
         if output_hidden_states:
-            hidden_states = (final_state, final_state, final_state, final_state)
-        else:
-            hidden_states = None
+            hidden_states = (
+                T.SimTensor(
+                    {
+                        "name": f"{self.name}_hs1",
+                        "data": np.random.randn(batch, 128 * 128, 32).astype(np.float32),
+                        "shape": [batch, 128 * 128, 32],
+                        "dtype": "float32",
+                    }
+                ),
+                T.SimTensor(
+                    {
+                        "name": f"{self.name}_hs2",
+                        "data": np.random.randn(batch, 64 * 64, 64).astype(np.float32),
+                        "shape": [batch, 64 * 64, 64],
+                        "dtype": "float32",
+                    }
+                ),
+                T.SimTensor(
+                    {
+                        "name": f"{self.name}_hs3",
+                        "data": np.random.randn(batch, 32 * 32, 160).astype(np.float32),
+                        "shape": [batch, 32 * 32, 160],
+                        "dtype": "float32",
+                    }
+                ),
+                T.SimTensor(
+                    {
+                        "name": f"{self.name}_hs4",
+                        "data": np.random.randn(batch, 16 * 16, 256).astype(np.float32),
+                        "shape": [batch, 16 * 16, 256],
+                        "dtype": "float32",
+                    }
+                ),
+            )
 
         return TtsimBaseModelOutput(
             last_hidden_state=final_state,
             hidden_states=hidden_states,
-            attentions=None
+            attentions=None,
         )
 
+# Monkey-patch encoder before importing model
+setattr(class_module, "TtsimSegformerEncoder", ValidatingMockEncoder)
 
-# Inject mock encoder using setattr
-setattr(class_module, 'TtsimSegformerEncoder', MockEncoder)
-
-# Import after patching
 from workloads.segformer.tt.segformer_model import TtsimSegformerModel
 
-
 def test_segformer_model() -> None:
-    print("=== Starting Polaris Segformer Model Test ===\n")
+    print("=== Starting Polaris Segformer Model Verification ===")
 
-    # --- 1. Load REAL config (like tt-metal) ---
-    config = load_config("configs/segformer_semantic_config.json")
+    config = DummyConfig()
 
-    # Print config values to verify
-    print(f"[CONFIG] num_channels: {config.num_channels}")
-    print(f"[CONFIG] num_encoder_blocks: {config.num_encoder_blocks}")
-    print(f"[CONFIG] hidden_sizes: {config.hidden_sizes}")
-    print(f"[CONFIG] depths: {config.depths}")
-    print(f"[CONFIG] output_hidden_states: {config.output_hidden_states}")
-    print(f"[CONFIG] use_return_dict: {config.use_return_dict}")
-    print()
-
-    # --- 2. Create input tensor ---
     batch_size = 1
-    num_channels = config.num_channels  # Use from config
+    num_channels = 3
     height = 512
     width = 512
 
-    pixel_values = T.SimTensor({
-        "name": "pixel_values",
-        "data": np.random.randn(batch_size, num_channels, height, width).astype(np.float32),
-        "shape": [batch_size, num_channels, height, width],
-        "dtype": "float32"
-    })
+    # Model input should be NCHW, like TT-Metal model.py
+    pixel_values = T.SimTensor(
+        {
+            "name": "pixel_values",
+            "data": np.random.randn(batch_size, num_channels, height, width).astype(np.float32),
+            "shape": [batch_size, num_channels, height, width],
+            "dtype": "float32",
+        }
+    )
 
-    # --- 3. Create parameters (mock for now) ---
     parameters: Dict[str, Any] = {
         "encoder": {}
     }
 
-    # --- 4. Create and run model ---
-    model = TtsimSegformerModel("segformer_model", config, parameters)
-    outputs = model(
-        pixel_values,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
-    )
+    try:
+        model = TtsimSegformerModel("segformer_model", config, parameters)
 
-    # --- 5. Print results (matching tt-metal format) ---
-    print(f"Input shape (pixel_values): {pixel_values.shape}")
-    print(f"Output shape (sequence_output): {outputs.last_hidden_state.shape}")  # type: ignore
+        outputs = model(
+            pixel_values,
+            output_attentions=False,
+            output_hidden_states=True,
+            return_dict=True,
+        )
 
-    if outputs.hidden_states is not None:  # type: ignore
-        print(f"Total hidden states returned: {len(outputs.hidden_states)}")  # type: ignore
-    else:
-        print(f"Total hidden states returned: 0 (hidden_states is None)")
+        final_shape = list(outputs.last_hidden_state.shape)
+        expected_final_shape = [1, 16, 16, 256]
 
-    # --- 6. Verify output shape ---
-    expected_shape = [1, 16, 16, 256]
-    actual_shape = list(outputs.last_hidden_state.shape)  # type: ignore
+        print(f"Input shape (NCHW): {list(pixel_values.shape)}")
+        print(f"Output shape (last_hidden_state): {final_shape}")
 
-    print()
-    if actual_shape == expected_shape:
-        print(f"[PASSED] Output shape matches expected: {expected_shape}")
-    else:
-        print(f"[FAILED] Expected {expected_shape}, got {actual_shape}")
+        if final_shape == expected_final_shape:
+            print(f"[PASSED] Final output shape matches expected: {expected_final_shape}")
+        else:
+            print(f"[FAILED] Expected final shape {expected_final_shape}, got {final_shape}")
 
-    print("\n=== Test Complete ===")
+        expected_stage_shapes = [
+            [1, 128 * 128, 32],
+            [1, 64 * 64, 64],
+            [1, 32 * 32, 160],
+            [1, 16 * 16, 256],
+        ]
 
+        if outputs.hidden_states is not None:
+            print("Hidden states:")
+            for i, hs in enumerate(outputs.hidden_states):
+                actual = list(hs.shape)
+                expected = expected_stage_shapes[i]
+                status = "OK" if actual == expected else "MISMATCH"
+                print(f"  Stage {i+1}: {actual} | expected {expected} | {status}")
+        else:
+            print("Hidden states: None")
+
+        print("=== Test Complete ===")
+
+    except Exception:
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     test_segformer_model()

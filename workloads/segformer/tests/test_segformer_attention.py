@@ -6,7 +6,9 @@ import sys
 import numpy as np
 import traceback
 
-sys.path.insert(0, "/Users/suhanadas/suhana_polaris_fork")
+repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..'))
+if repo_root not in sys.path:
+    sys.path.insert(0, repo_root)
 
 import ttsim.front.functional.tensor_op as T
 from workloads.segformer.tt.segformer_attention import TtsimSegformerAttention
@@ -36,7 +38,7 @@ def mock_params(hidden_size, sr):
         p["self"]["sr"] = {"weight": np.random.randn(hidden_size, hidden_size, sr, sr).astype(np.float32), "bias": np.random.randn(hidden_size).astype(np.float32)}
     return p
 
-# --- YOUR PARAMETER LIST ---
+# --- PARAMETER LIST ---
 # (hidden_size, num_attention_heads, sequence_reduction_ratio, batch_size, seq_len, height, width, block_i, attention_i)
 test_cases = [
     (32, 1, 8, 1, 16384, 128, 128, 0, 0),
@@ -65,8 +67,8 @@ def run_tests():
         
         try:
             # 1. Generate Input Tensor
-            x = create_polaris_tensor(np.random.randn(batch_size, seq_len, hidden_size))
-            
+            x = create_polaris_tensor(np.random.randn(batch_size, 1, seq_len, hidden_size))
+
             # 2. Initialize Model
             model = TtsimSegformerAttention(
                 name=f"attn_{block_i}_{attention_i}",
@@ -80,7 +82,7 @@ def run_tests():
             out = model(x, height, width)[0]
             
             # 4. Verify Shape
-            expected_shape = [batch_size, seq_len, hidden_size]
+            expected_shape = [batch_size, 1, seq_len, hidden_size]
             if out.shape == expected_shape:
                 print(f"[PASSED] {test_name} -> Output Shape: {out.shape}")
             else:

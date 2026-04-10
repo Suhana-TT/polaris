@@ -3,10 +3,10 @@
 
 import os
 import sys
+import numpy as np
 
-# Standard path logic
 current_dir = os.path.dirname(__file__)
-repo_root = os.path.abspath(os.path.join(current_dir, '../..'))
+repo_root = os.path.abspath(os.path.join(current_dir, "../.."))
 if repo_root not in sys.path:
     sys.path.insert(0, repo_root)
 
@@ -14,25 +14,27 @@ import ttsim.front.functional.sim_nn as SimNN
 
 class TtsimSegformerMLP:
     """
-    Linear Embedding used in the Decode Head to unify channel dimensions.
+    Linear embedding used in the SegFormer decode head.
+    Input:  [B, S, C]
+    Output: [B, S, 256]
     """
+
     def __init__(self, name: str, parameters):
         self.name = name
-        
-        in_feat = parameters["proj"]["weight"].shape[1]
-        out_feat = parameters["proj"]["weight"].shape[0]
 
-        # Initialize the graph node (shapes only)
+        # SimNN.Linear expects param shape [out_features, in_features]
+        out_feat = int(parameters["proj"]["weight"].shape[0])
+        in_feat = int(parameters["proj"]["weight"].shape[1])
+
         self.proj = SimNN.Linear(
             name=f"{self.name}_proj",
             in_features=in_feat,
             out_features=out_feat,
-            bias=True
+            bias=True,
         )
 
-    def __call__(self, hidden_states):
-        # The DecodeHead passes a flattened 3D sequence here, 
-        # so we just pipe it straight into the Linear layer!
-        hidden_states = self.proj(hidden_states)
+        self.proj.param.data = np.array(parameters["proj"]["weight"], dtype=np.float32).copy()
+        self.proj.bias.data = np.array(parameters["proj"]["bias"], dtype=np.float32).reshape(-1).copy()
 
-        return hidden_states
+    def __call__(self, hidden_states):
+        return self.proj(hidden_states)

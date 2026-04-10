@@ -16,8 +16,9 @@ from workloads.segformer.tt.segformer_mlp import TtsimSegformerMLP
 def create_polaris_tensor(numpy_array):
     cfg = {
         "name": "dummy_input_tensor",
-        "data": numpy_array,
-        "shape": list(numpy_array.shape)
+        "data": numpy_array.astype(np.float32),
+        "shape": list(numpy_array.shape),
+        "dtype": "float32",
     }
     return T.SimTensor(cfg)
 
@@ -53,10 +54,10 @@ def run_tests():
             # 3. MOCK PARAMETERS
             mock_parameters = {
                 "proj": {
-                    "weight": np.random.randn(decoder_hidden_size, input_dim).astype(np.float32),
-                    "bias": np.random.randn(decoder_hidden_size).astype(np.float32)
-                }
+                "weight": np.random.randn(decoder_hidden_size, input_dim).astype(np.float32),
+                "bias": np.random.randn(decoder_hidden_size).astype(np.float32),
             }
+        }
 
             # 4. INITIALIZE POLARIS MODEL
             ttsim_model = TtsimSegformerMLP(

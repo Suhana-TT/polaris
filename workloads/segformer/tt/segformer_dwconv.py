@@ -5,53 +5,81 @@ import os
 import sys
 import numpy as np
 
-sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
+sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
 
 import ttsim.front.functional.tensor_op as T
 import ttsim.front.functional.op as F
 from workloads.segformer.tt.segformer_common import TtsimConv
 
 class TtsimSegformerDWConv:
-    def __init__(self, name: str, parameters: dict, dim: int):
+    def __init__(self, name: str, parameters: dict, dim: int, activation=None):
         self.name = name
         self.dim = int(dim)
-        
-        # We explicitly pass the kernel size [3, 3] and groups=dim (Depthwise)
-        # to the TtsimConv constructor.
-        # .. inside __init__ ..
-        # Ensure this line exists in segformer_dwconv.py:
-        # segformer_dwconv.py
+
+        conv_params = parameters["dwconv"] if "dwconv" in parameters else parameters
+
         self.dwconv = TtsimConv(
             name=f"{self.name}_dwconv",
             strides=[1, 1, 1, 1],
-            parameters=parameters["dwconv"],
-            kernel_size=[3, 3], # <--- Pass these as simple ints
-            groups=int(dim)     # <--- Ensure groups is an int
+            parameters=conv_params,
+            kernel_size=[3, 3],
+            groups=self.dim,
         )
 
-    def _get_shape_tensor(self, shape_list, name):
-        # Force all dimensions to be flat integers
-        clean_shape = [int(s) for s in shape_list]
-        return T.SimTensor({
-            "name": name,
-            "data": np.array(clean_shape, dtype=np.int64),
-            "shape": [len(clean_shape)],
-            "dtype": np.int64
-        })
+        self.to_nchw_t = F.Transpose(f"{self.name}_to_nchw_t", perm=[0, 2, 1])
+        self.to_seq_t = F.Transpose(f"{self.name}_to_seq_t", perm=[0, 2, 1])
 
-    def __call__(self, x, height: int, width: int):
-        B, S, C = x.shape
-        # Input volume is B*S*C
-        
-        # 1. Reshape [B, S, C] to [B, C, H, W]
-        # We assume S = H * W
-        x = F.Transpose(f"{self.name}_t1", perm=[0, 2, 1])(x)
-        x = F.Reshape(f"{self.name}_rs1")(x, self._get_shape_tensor([B, C, height, width], "s1"))
-        
-        # 2. Conv
+        self.gelu = None if activation is None else F.Gelu(f"{self.name}_gelu")
+
+    def _get_shape_tensor(self, shape_list, name):
+        return T.SimTensor(
+            {
+                "name": name,
+                "data": np.array([int(s) for s in shape_list], dtype=np.int64),
+                "shape": [len(shape_list)],
+                "dtype": np.int64,
+            }
+        )
+
+    def __call__(self, hidden_states, height: int, width: int):
+        x = hidden_states[0] if isinstance(hidden_states, (list, tuple)) else hidden_states
+        shape = list(x.shape)
+
+        if len(shape) == 3:
+            batch_size, seq_len, num_channels = shape
+        elif len(shape) == 4:
+            batch_size, one, seq_len, num_channels = shape
+            if one != 1:
+                raise ValueError(f"{self.name}: expected [B, 1, S, C], got {shape}")
+            x = F.Reshape(f"{self.name}_squeeze_seq")(
+                x,
+                self._get_shape_tensor([batch_size, seq_len, num_channels], f"{self.name}_shape_3d"),
+            )
+        else:
+            raise ValueError(f"{self.name}: expected 3D or 4D input, got {shape}")
+
+        if int(seq_len) != int(height * width):
+            raise ValueError(
+                f"{self.name}: seq_len {seq_len} does not match height*width {height * width}"
+            )
+
+        # [B, S, C] -> [B, C, S] -> [B, C, H, W]
+        x = self.to_nchw_t(x)
+        x = F.Reshape(f"{self.name}_to_nchw_rs")(
+            x,
+            self._get_shape_tensor([batch_size, num_channels, height, width], f"{self.name}_shape_nchw"),
+        )
+
         x = self.dwconv(x)
-        
-        # 3. Flatten back to [B, S, C]
-        x = F.Reshape(f"{self.name}_rs2")(x, self._get_shape_tensor([B, C, S], "s2"))
-        x = F.Transpose(f"{self.name}_t2", perm=[0, 2, 1])(x)
+
+        if self.gelu is not None:
+            x = self.gelu(x)
+
+        # [B, C, H, W] -> [B, C, S] -> [B, S, C]
+        x = F.Reshape(f"{self.name}_to_seq_rs")(
+            x,
+            self._get_shape_tensor([batch_size, num_channels, height * width], f"{self.name}_shape_chw_seq"),
+        )
+        x = self.to_seq_t(x)
+
         return x

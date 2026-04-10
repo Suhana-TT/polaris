@@ -5,7 +5,9 @@ import os
 import numpy as np
 from typing import Any, Dict, List
 
-sys.path.insert(0, "/Users/suhanadas/suhana_polaris_fork")
+repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..'))
+if repo_root not in sys.path:
+    sys.path.insert(0, repo_root)
 
 import ttsim.front.functional.op as F
 import ttsim.front.functional.tensor_op as T

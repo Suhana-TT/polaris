@@ -6,8 +6,9 @@ import sys
 import numpy as np
 import traceback
 
-# We are forcing Python to recognize the root of your project
-sys.path.insert(0, "/Users/suhanadas/suhana_polaris_fork")
+repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..'))
+if repo_root not in sys.path:
+    sys.path.insert(0, repo_root)
 
 import ttsim.front.functional.tensor_op as T
 from workloads.segformer.tt.segformer_efficient_selfattention import TtsimSegformerEfficientSelfAttention
@@ -67,7 +68,7 @@ def run_tests():
         test_name = f"Block {block_i} | Shape: ({b}, {s}, {c}) | Heads: {heads} | SR: {sr}"
         
         try:
-            numpy_input = np.random.randn(b, s, c).astype(np.float32)
+            numpy_input = np.random.randn(b, 1, s, c).astype(np.float32)
             polaris_input = create_polaris_tensor(numpy_input)
             mock_params = create_mock_parameters(c, sr)
 
@@ -76,16 +77,16 @@ def run_tests():
                 hidden_size=c,
                 num_attention_heads=heads,
                 parameters=mock_params,
-                sequence_reduction_ratio=sr
+                sequence_reduction_ratio=sr,
             )
-            
+
             outputs = model(polaris_input, h, w)
             out_tensor = outputs[0] if isinstance(outputs, tuple) else outputs
 
-            expected_shape = (b, s, c)
+            expected_shape = (b, 1, s, c)
             if tuple(out_tensor.shape) != expected_shape:
                 raise ValueError(f"Shape mismatch! Expected {expected_shape}, got {tuple(out_tensor.shape)}")
-
+            
             print(f"[PASSED] {test_name}")
 
         except Exception as e:

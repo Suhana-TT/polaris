@@ -5,7 +5,8 @@ import sys
 import numpy as np
 from typing import Any, Dict, List, Optional, Union
 
-sys.path.insert(0, "/Users/suhanadas/suhana_polaris_fork")
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
+
 import ttsim.front.functional.tensor_op as T
 import ttsim.front.functional.op as F
 

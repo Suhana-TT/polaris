@@ -6,8 +6,10 @@ import numpy as np
 import traceback
 from typing import Any, Tuple
 
-# Force pathing
-sys.path.insert(0, "/Users/suhanadas/suhana_polaris_fork")
+repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..'))
+if repo_root not in sys.path:
+    sys.path.insert(0, repo_root)
+
 import ttsim.front.functional.tensor_op as T
 import workloads.segformer.tt.segformer_layer as class_module
 
@@ -66,8 +68,8 @@ def run_tests() -> None:
         # 1. Mock Input Sequence
         hidden_states = T.SimTensor({
             "name": f"hidden_states_{block_i}_{segformer_i}",
-            "data": np.random.randn(batch_size, seq_len, hidden_size).astype(np.float32),
-            "shape": [batch_size, seq_len, hidden_size],
+            "data": np.random.randn(batch_size, 1, seq_len, hidden_size).astype(np.float32),
+            "shape": [batch_size, 1, seq_len, hidden_size],
             "dtype": "float32"
         })
 
@@ -99,7 +101,7 @@ def run_tests() -> None:
             outputs = model(hidden_states, height, width)
             layer_output = outputs[0]
 
-            expected_shape = [batch_size, seq_len, hidden_size]
+            expected_shape = [batch_size, 1, seq_len, hidden_size]
             if layer_output.shape == expected_shape:
                 print(f"[PASSED] {test_name} -> Output Shape: {layer_output.shape}")
             else:

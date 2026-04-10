@@ -7,7 +7,9 @@ import numpy as np
 import traceback
 
 # Force pathing
-sys.path.insert(0, "/Users/suhanadas/suhana_polaris_fork")
+repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..'))
+if repo_root not in sys.path:
+    sys.path.insert(0, repo_root)
 
 import ttsim.front.functional.tensor_op as T
 from workloads.segformer.tt.segformer_overlap_patch_embeddings import TtsimSegformerOverlapPatchEmbeddings
@@ -62,11 +64,11 @@ def run_tests():
             output, out_h, out_w = model(pixel_values)
             
             # 4. Verify Shape Math
-            expected_h = height // stride
-            expected_w = width // stride
+            pad = patch_size // 2
+            expected_h = ((height + 2 * pad - patch_size) // stride) + 1
+            expected_w = ((width + 2 * pad - patch_size) // stride) + 1
             expected_seq_len = expected_h * expected_w
             expected_shape = [batch_size, expected_seq_len, hidden_size]
-            
             if output.shape == expected_shape and out_h == expected_h and out_w == expected_w:
                 print(f"[PASSED] {test_name} -> Output Shape: {output.shape}, H={out_h}, W={out_w}")
             else:
