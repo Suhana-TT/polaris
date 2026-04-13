@@ -1,87 +1,73 @@
-# SPDX-FileCopyrightText: (C) 2025 Tenstorrent AI ULC
+# SPDX-FileCopyrightText: © 2025 Tenstorrent AI ULC
 # SPDX-License-Identifier: Apache-2.0
-import os
-import sys
-import numpy as np
-from typing import Any, Dict, List, Optional, Union
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
-
-import ttsim.front.functional.tensor_op as T
-import ttsim.front.functional.op as F
+import ttsim.front.ttnn as ttnn
 
 
-class TtsimConv:
-    def __init__(self, name: str, strides: List[int], parameters: Dict[str, Any], 
-                 kernel_size: Optional[List[int]] = None, groups: int = 1):
-        self.name = name
-        self.strides = strides
-        self.dtype = "float32"
-        self.bias: Optional[T.SimTensor] = None  # Initialize with type hint
+class Conv:
+    def __init__(
+        self,
+        conv_params,
+        parameters,
+        *,
+        act_block_h=None,
+        reshard=False,
+        deallocate=True,
+        height_sharding=True,
+        activation=None,
+        groups=1,
+        dtype=ttnn.bfloat8_b,
+        output_layout=ttnn.TILE_LAYOUT,
+    ) -> None:
+        self.weights = parameters["weight"]
+        self.bias = parameters["bias"]
+        
+        self.kernel_size = (self.weights.shape[2], self.weights.shape[3])
+        self.conv_params = conv_params
+        self.out_channels = self.weights.shape[0]
+        self.act_block_h = act_block_h
+        self.reshard = reshard
+        self.deallocate = deallocate
+        self.activation = activation
+        self.groups = groups
+        self.dtype = dtype
+        self.shard_layout = (
+            ttnn.TensorMemoryLayout.HEIGHT_SHARDED if height_sharding else ttnn.TensorMemoryLayout.BLOCK_SHARDED
+        )
+        self.output_layout = output_layout
 
-        raw_w = parameters["weight"]
+    def __call__(self, device, input_tensor):
+        # Input is NCHW format for ttsim conv2d
+        batch_size = input_tensor.shape[0]
+        in_channels = input_tensor.shape[1]
+        input_height = input_tensor.shape[2]
+        input_width = input_tensor.shape[3]
 
-        # Ensure 4D shape [Out, In, H, W]
-        if len(raw_w.shape) == 3:
-            raw_w = raw_w.reshape(raw_w.shape[0], 1, raw_w.shape[1], raw_w.shape[2])
+        stride_h = self.conv_params[0]
+        stride_w = self.conv_params[1]
+        pad_h = self.conv_params[2]
+        pad_w = self.conv_params[3]
 
-        out_c = int(raw_w.shape[0])
-        weight_in_c = int(raw_w.shape[1])  # This is (in_channels / groups)
+        # Calculate output dimensions
+        out_height = (input_height + 2 * pad_h - self.kernel_size[0]) // stride_h + 1
+        out_width = (input_width + 2 * pad_w - self.kernel_size[1]) // stride_w + 1
 
-        # --- THE FIX: Calculate the REAL total in_channels ---
-        actual_in_c = weight_in_c * int(groups)
-
-        def flatten(lst: Any) -> List[int]:
-            flat: List[int] = []
-            for item in lst:
-                if isinstance(item, (list, tuple)):
-                    flat.extend(flatten(item))
-                else:
-                    flat.append(int(item))
-            return flat
-
-        if kernel_size is not None:
-            k_dims = flatten(kernel_size)
-            k_h, k_w = k_dims[0], k_dims[1]
-        else:
-            k_h = int(raw_w.shape[2]) if len(raw_w.shape) > 2 else 1
-            k_w = int(raw_w.shape[3]) if len(raw_w.shape) > 3 else 1
-
-        flat_shape = [out_c, weight_in_c, k_h, k_w]
-
-        self.weight = T.SimTensor({
-            "name": f"{name}_w",
-            "data": raw_w,
-            "shape": flat_shape,
-            "dtype": self.dtype
-        })
-
-        pad_val = int(self.strides[2]) if len(self.strides) > 2 else 1
-
-        self.conv_op = F.Conv2d(
-            f"{name}_op",
-            in_channels=actual_in_c,  # Pass the true channel count!
-            out_channels=out_c,
-            kernel_size=k_h,
-            stride=int(self.strides[0]),
-            padding=pad_val,
-            groups=int(groups)
+        # Perform conv2d
+        output_tensor = ttnn.conv2d(
+            input_tensor=input_tensor,
+            weight_tensor=self.weights,
+            bias_tensor=self.bias,
+            in_channels=in_channels,
+            out_channels=self.out_channels,
+            batch_size=batch_size,
+            input_height=input_height,
+            input_width=input_width,
+            kernel_size=self.kernel_size,
+            stride=(stride_h, stride_w),
+            padding=(pad_h, pad_w),
+            dilation=(1, 1),
+            groups=self.groups,
+            device=device,
+            dtype=self.dtype,
         )
 
-        self.conv_op.weight = self.weight
-
-        if "bias" in parameters:
-            raw_b = parameters["bias"]
-            b_shape = [1, out_c, 1, 1]
-            self.bias = T.SimTensor({
-                "name": f"{name}_b",
-                "data": raw_b.reshape(b_shape),
-                "shape": b_shape,
-                "dtype": self.dtype
-            })
-
-    def __call__(self, x: Any) -> Any:
-        out = self.conv_op(x)
-        if self.bias is not None:
-            out = F.Add(f"{self.name}_add")(out, self.bias)
-        return out
+        return output_tensor, out_height, out_width

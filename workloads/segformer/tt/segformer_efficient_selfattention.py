@@ -1,180 +1,208 @@
 # SPDX-FileCopyrightText: © 2025 Tenstorrent AI ULC
 # SPDX-License-Identifier: Apache-2.0
+import ttsim.front.ttnn as ttnn
+from workloads.segformer.tt.segformer_common import Conv
 
-import os
-import sys
-import numpy as np
-from typing import Any, Tuple
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
+def create_qkv_heads(tensor, num_heads, memory_config):
+    """
+    Manual implementation of nlp_create_qkv_heads_segformer.
+    """
+    if len(tensor.shape) == 4:
+        batch, _, seq_len, hidden_size = tensor.shape
+    else:
+        batch, seq_len, hidden_size = tensor.shape
 
-import ttsim.front.functional.tensor_op as T
-import ttsim.front.functional.op as F
-import ttsim.front.functional.sim_nn as SimNN
-from workloads.segformer.tt.segformer_common import TtsimConv
+    head_size = hidden_size // num_heads
+    tensor = ttnn.reshape(tensor, (batch, seq_len, num_heads, head_size))
+    tensor = ttnn.permute(tensor, (0, 2, 1, 3))
 
-class TtsimSegformerEfficientSelfAttention(SimNN.Module):
-    def __init__(
-        self,
-        name: str,
-        hidden_size: int,
-        num_attention_heads: int,
-        parameters: Any,
-        sequence_reduction_ratio: int,
-    ):
-        super().__init__()
-        self.name = name
+    return tensor
+
+
+def concat_heads(tensor, memory_config):
+    """
+    Manual implementation of nlp_concat_heads.
+    """
+    batch, num_heads, seq_len, head_size = tensor.shape
+    hidden_size = num_heads * head_size
+    tensor = ttnn.permute(tensor, (0, 2, 1, 3))
+    tensor = ttnn.reshape(tensor, (batch, seq_len, hidden_size))
+
+    return tensor
+
+
+class TtSegformerEfficientSelfAttention:
+    def __init__(self, hidden_size, num_attention_heads, parameters, sequence_reduction_ratio):
         self.hidden_size = hidden_size
         self.num_attention_heads = num_attention_heads
-        self.head_size = hidden_size // num_attention_heads
-        self.sr_ratio = sequence_reduction_ratio
-        self.dtype = "float32"
 
         if self.hidden_size % self.num_attention_heads != 0:
             raise ValueError(
-                f"The hidden size ({self.hidden_size}) is not a multiple of the number of attention heads "
-                f"({self.num_attention_heads})"
+                f"The hidden size ({self.hidden_size}) is not a multiple of the number of attention "
+                f"heads ({self.num_attention_heads})"
             )
 
-        self.q_w, self.q_b = self._make_linear_params(f"{name}.query", parameters["query"])
-        self.k_w, self.k_b = self._make_linear_params(f"{name}.key", parameters["key"])
-        self.v_w, self.v_b = self._make_linear_params(f"{name}.value", parameters["value"])
+        self.attention_head_size = self.hidden_size // self.num_attention_heads
+        self.all_head_size = self.num_attention_heads * self.attention_head_size
+        self.sr_ratio = sequence_reduction_ratio
 
-        self.scale_tensor = self._const_tensor(
-            f"{name}.scale",
-            np.array([self.head_size**-0.5], dtype=np.float32),
+        if sequence_reduction_ratio > 1:
+            self.sr = Conv([sequence_reduction_ratio, sequence_reduction_ratio, 0, 0], parameters["sr"])
+            self.layer_norm_weight = parameters["layer_norm"]["weight"]
+            self.layer_norm_bias = parameters["layer_norm"]["bias"]
+
+        self.query_weight = parameters["query"]["weight"]
+        self.query_bias = parameters["query"]["bias"]
+        self.key_weight = parameters["key"]["weight"]
+        self.key_bias = parameters["key"]["bias"]
+        self.value_weight = parameters["value"]["weight"]
+        self.value_bias = parameters["value"]["bias"]
+
+    def __call__(
+        self,
+        device,
+        hidden_states: ttnn.Tensor,
+        height: int,
+        width: int,
+        output_attentions: bool = False,
+    ):
+        if len(hidden_states.shape) == 4:
+            batch_size, __, seq_len, hidden_size = hidden_states.shape
+        elif len(hidden_states.shape) == 3:
+            batch_size, seq_len, hidden_size = hidden_states.shape
+
+        # Store the number of channels for later use
+        num_channels = hidden_size
+
+        hidden_states = ttnn.to_layout(hidden_states, ttnn.TILE_LAYOUT)
+
+        query = ttnn.linear(
+            hidden_states,
+            self.query_weight,
+            bias=self.query_bias,
+            memory_config=ttnn.L1_MEMORY_CONFIG,
+            dtype=ttnn.bfloat16,
         )
+
+        if self.num_attention_heads == 1:
+            query_layer = query
+        else:
+            query_layer = create_qkv_heads(query, self.num_attention_heads, ttnn.L1_MEMORY_CONFIG)
 
         if self.sr_ratio > 1:
-            self.sr = TtsimConv(f"{name}.sr", [self.sr_ratio, self.sr_ratio, 0, 0], parameters["sr"])
-            self.ln_w = self._const_tensor(f"{name}.layer_norm.weight", parameters["layer_norm"]["weight"])
-            self.ln_b = self._const_tensor(f"{name}.layer_norm.bias", parameters["layer_norm"]["bias"])
+            # Get current shape info
+            if len(hidden_states.shape) == 3:
+                batch_size, seq_len, num_channels = hidden_states.shape
+            elif len(hidden_states.shape) == 4:
+                batch_size, __, seq_len, num_channels = hidden_states.shape
 
-        # pre-registered ops
-        self.q_mm = F.MatMul(f"{name}.q_mm")
-        self.q_add = F.Add(f"{name}.q_add")
-        self.q_rs = F.Reshape(f"{name}.q_rs")
-        self.q_pm = F.Transpose(f"{name}.q_pm", perm=[0, 2, 1, 3])
+            # First reshape to remove the extra dimension if present
+            if len(hidden_states.shape) == 4:
+                hidden_states = ttnn.reshape(hidden_states, (batch_size, seq_len, num_channels))
 
-        self.k_mm = F.MatMul(f"{name}.k_mm")
-        self.k_add = F.Add(f"{name}.k_add")
-        self.k_rs = F.Reshape(f"{name}.k_rs")
-        self.k_pm = F.Transpose(f"{name}.k_pm", perm=[0, 2, 3, 1])
+            # Reshape from [batch, seq_len, channels] to [batch, height, width, channels] (NHWC)
+            hidden_states = ttnn.reshape(hidden_states, (batch_size, height, width, num_channels))
 
-        self.v_mm = F.MatMul(f"{name}.v_mm")
-        self.v_add = F.Add(f"{name}.v_add")
-        self.v_rs = F.Reshape(f"{name}.v_rs")
-        self.v_pm = F.Transpose(f"{name}.v_pm", perm=[0, 2, 1, 3])
+            # Convert NHWC to NCHW for conv2d: [batch, height, width, channels] -> [batch, channels, height, width]
+            hidden_states = ttnn.permute(hidden_states, (0, 3, 1, 2))
 
-        self.in_rs = F.Reshape(f"{name}.in_rs")
-        self.kv_rs1 = F.Reshape(f"{name}.kv_rs1")
-        self.kv_pm1 = F.Transpose(f"{name}.kv_pm1", perm=[0, 3, 1, 2])
-        self.kv_pm2 = F.Transpose(f"{name}.kv_pm2", perm=[0, 2, 3, 1])
-        self.kv_rs2 = F.Reshape(f"{name}.kv_rs2")
+            # Convert to ROW_MAJOR layout for conv2d
+            hidden_states = ttnn.to_layout(hidden_states, ttnn.ROW_MAJOR_LAYOUT)
 
-        self.ln = F.LayerNorm(f"{name}.ln", hidden_size)
-        self.ln_mul = F.Mul(f"{name}.ln_mul")
-        self.ln_add = F.Add(f"{name}.ln_add")
+            # Apply sequence reduction convolution (expects NCHW)
+            hidden_states, out_h, out_w = self.sr(device, hidden_states)
+            hidden_states = ttnn.to_memory_config(hidden_states, memory_config=ttnn.L1_MEMORY_CONFIG)
 
-        self.attn_mm = F.MatMul(f"{name}.attn_mm")
-        self.attn_scale = F.Mul(f"{name}.attn_scale")
-        self.attn_sm = F.Softmax(f"{name}.attn_sm", dim=-1)
-        self.ctx_mm = F.MatMul(f"{name}.ctx_mm")
+            # Conv output is NCHW: [batch, channels, out_h, out_w]
+            # Convert back to sequence format: first to NHWC, then flatten
+            # NCHW -> NHWC: [batch, channels, out_h, out_w] -> [batch, out_h, out_w, channels]
+            hidden_states = ttnn.permute(hidden_states, (0, 2, 3, 1))
 
-        self.o_pm = F.Transpose(f"{name}.o_pm", perm=[0, 2, 1, 3])
-        self.o_rs3d = F.Reshape(f"{name}.o_rs3d")
-        self.o_rs4d = F.Reshape(f"{name}.o_rs4d")
+            # Reshape to sequence format: [batch, out_h, out_w, channels] -> [batch, 1, out_h*out_w, channels]
+            new_seq_len = out_h * out_w
+            hidden_states = ttnn.reshape(hidden_states, (batch_size, 1, new_seq_len, num_channels))
 
-        super().link_op2module()
+            # Apply layer norm
+            hidden_states = ttnn.to_layout(hidden_states, ttnn.TILE_LAYOUT)
+            hidden_states = ttnn.layer_norm(
+                hidden_states,
+                weight=self.layer_norm_weight,
+                bias=self.layer_norm_bias,
+                memory_config=ttnn.L1_MEMORY_CONFIG,
+                compute_kernel_config=ttnn.WormholeComputeKernelConfig(math_fidelity=ttnn.MathFidelity.HiFi4),
+            )
 
-    def _const_tensor(self, name: str, data: np.ndarray) -> T.SimTensor:
-        t = T.SimTensor(
-            {
-                "name": name,
-                "data": np.asarray(data, dtype=np.float32),
-                "shape": list(np.asarray(data).shape),
-                "dtype": self.dtype,
-                "op_in": [],
-            }
+        key = ttnn.linear(
+            hidden_states,
+            self.key_weight,
+            bias=self.key_bias,
+            memory_config=ttnn.L1_MEMORY_CONFIG,
+            dtype=ttnn.bfloat8_b,
         )
-        t.link_module = self
-        self._tensors[t.name] = t
-        return t
 
-    def _shape_tensor(self, name: str, shape_list: list[int]) -> T.SimTensor:
-        t = T.SimTensor(
-            {
-                "name": name,
-                "data": np.array(shape_list, dtype=np.int64),
-                "shape": [len(shape_list)],
-                "dtype": np.int64,
-                "op_in": [],
-            }
+        if self.num_attention_heads == 1:
+            key_layer = key
+        else:
+            key_layer = create_qkv_heads(key, self.num_attention_heads, ttnn.L1_MEMORY_CONFIG)
+
+        key_layer = ttnn.permute(key_layer, (0, 1, 3, 2))
+
+        value = ttnn.linear(
+            hidden_states,
+            self.value_weight,
+            bias=self.value_bias,
+            memory_config=ttnn.L1_MEMORY_CONFIG,
+            dtype=ttnn.bfloat8_b,
         )
-        t.link_module = self
-        self._tensors[t.name] = t
-        return t
 
-    def _make_linear_params(self, prefix: str, p: dict) -> Tuple[T.SimTensor, T.SimTensor]:
-        w_data = p["weight"].T if p["weight"].shape[0] == self.hidden_size else p["weight"]
-        w = self._const_tensor(f"{prefix}.weight", w_data)
-        b = self._const_tensor(f"{prefix}.bias", p["bias"].reshape(1, -1))
-        return w, b
+        ttnn.deallocate(hidden_states)
 
-    def _linear(self, x: Any, w: T.SimTensor, b: T.SimTensor, mm_op: Any, add_op: Any) -> Any:
-        return add_op(mm_op(x, w), b)
+        if self.num_attention_heads == 1:
+            value_layer = value
+        else:
+            value_layer = create_qkv_heads(value, self.num_attention_heads, ttnn.L1_MEMORY_CONFIG)
 
-    def __call__(self, hidden_states: Any, height: int, width: int, output_attentions: bool = False) -> Tuple[Any]:
-        x = hidden_states[0] if isinstance(hidden_states, (list, tuple)) else hidden_states
-        shape = list(x.shape)
+        query_layer = ttnn.to_layout(query_layer, ttnn.TILE_LAYOUT)
 
-        if len(shape) != 4:
-            raise ValueError(f"{self.name}: expected 4D input [B, 1, S, C], got {shape}")
+        attention_scores = ttnn.matmul(
+            query_layer,
+            key_layer,
+            memory_config=ttnn.L1_MEMORY_CONFIG,
+            dtype=ttnn.bfloat8_b,
+        )
 
-        B, one, S, C = shape
-        if one != 1:
-            raise ValueError(f"{self.name}: expected second dim == 1, got {shape}")
+        ttnn.deallocate(query_layer)
+        ttnn.deallocate(key_layer)
 
-        # [B,1,S,C] -> [B,S,C]
-        x = self.in_rs(x, self._shape_tensor(f"{self.name}.in_shape3d", [B, S, C]))
+        scale_value = self.attention_head_size ** -0.5
+        attention_scores = ttnn.multiply(attention_scores, scale_value)
 
-        # Query: [B,S,C] -> [B,H,S,D]
-        q = self._linear(x, self.q_w, self.q_b, self.q_mm, self.q_add)
-        q = self.q_rs(q, self._shape_tensor(f"{self.name}.q_shape", [B, S, self.num_attention_heads, self.head_size]))
-        q = self.q_pm(q)
+        attention_probs = ttnn.softmax(attention_scores, dim=-1, numeric_stable=False)
 
-        # KV path
-        kv = x
-        if self.sr_ratio > 1:
-            kv = self.kv_rs1(kv, self._shape_tensor(f"{self.name}.kv_hw_shape", [B, height, width, C]))
-            kv = self.kv_pm1(kv)  # [B,C,H,W]
-            kv = self.sr(kv)
-            kv = self.kv_pm2(kv)  # [B,H',W',C]
-            kv = self.kv_rs2(kv, self._shape_tensor(f"{self.name}.kv_seq_shape", [B, -1, C]))
-            kv = self.ln(kv)
-            kv = self.ln_mul(kv, self.ln_w)
-            kv = self.ln_add(kv, self.ln_b)
+        ttnn.deallocate(attention_scores)
 
-        # Key: [B,S',C] -> [B,H,D,S']
-        k = self._linear(kv, self.k_w, self.k_b, self.k_mm, self.k_add)
-        k = self.k_rs(k, self._shape_tensor(f"{self.name}.k_shape", [B, -1, self.num_attention_heads, self.head_size]))
-        k = self.k_pm(k)
+        attention_probs = ttnn.to_layout(attention_probs, ttnn.TILE_LAYOUT)
 
-        # Value: [B,S',C] -> [B,H,S',D]
-        v = self._linear(kv, self.v_w, self.v_b, self.v_mm, self.v_add)
-        v = self.v_rs(v, self._shape_tensor(f"{self.name}.v_shape", [B, -1, self.num_attention_heads, self.head_size]))
-        v = self.v_pm(v)
+        context_layer = ttnn.matmul(
+            attention_probs,
+            value_layer,
+            memory_config=ttnn.L1_MEMORY_CONFIG,
+            dtype=ttnn.bfloat8_b,
+        )
 
-        # Attention
-        attn = self.attn_mm(q, k)                 # [B,H,S,S']
-        attn = self.attn_scale(attn, self.scale_tensor)
-        attn = self.attn_sm(attn)
+        ttnn.deallocate(value)
+        ttnn.deallocate(value_layer)
 
-        out = self.ctx_mm(attn, v)               # [B,H,S,D]
-        out = self.o_pm(out)                     # [B,S,H,D]
-        out = self.o_rs3d(out, self._shape_tensor(f"{self.name}.out_shape3d", [B, S, C]))
-        out = self.o_rs4d(out, self._shape_tensor(f"{self.name}.out_shape4d", [B, 1, S, C]))
+        if not output_attentions:
+            ttnn.deallocate(attention_probs)
+        else:
+            attention_probs = ttnn.to_memory_config(attention_probs, ttnn.L1_MEMORY_CONFIG)
 
-        if output_attentions:
-            return (out, attn)
-        return (out,)
+        if self.num_attention_heads > 1:
+            context_layer = ttnn.to_memory_config(context_layer, ttnn.L1_MEMORY_CONFIG)
+            context_layer = concat_heads(context_layer, ttnn.L1_MEMORY_CONFIG)
+
+        outputs = (context_layer, attention_probs) if output_attentions else (context_layer,)
+
+        return outputs

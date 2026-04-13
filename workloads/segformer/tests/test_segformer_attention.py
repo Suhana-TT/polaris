@@ -54,7 +54,7 @@ test_cases = [
 class DummyConfig:
     pass
 
-def run_tests():
+def test_segformer_attention():
     print("=== Starting Polaris Attention Verification ===")
     all_passed = True
     config = DummyConfig()
@@ -67,7 +67,7 @@ def run_tests():
         
         try:
             # 1. Generate Input Tensor
-            x = create_polaris_tensor(np.random.randn(batch_size, 1, seq_len, hidden_size))
+            input_tensor = create_polaris_tensor(np.random.randn(batch_size, 1, seq_len, hidden_size))
 
             # 2. Initialize Model
             model = TtsimSegformerAttention(
@@ -79,7 +79,7 @@ def run_tests():
             )
             
             # 3. Run Math
-            out = model(x, height, width)[0]
+            out = model(input_tensor, height, width)[0]
             
             # 4. Verify Shape
             expected_shape = [batch_size, 1, seq_len, hidden_size]
@@ -98,4 +98,4 @@ def run_tests():
         print("\n All Attention configurations passed successfully!")
 
 if __name__ == "__main__":
-    run_tests()
+    test_segformer_attention()
