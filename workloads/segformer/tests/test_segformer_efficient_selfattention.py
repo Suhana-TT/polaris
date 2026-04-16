@@ -10,6 +10,50 @@ def log(message):
     print(message)
     sys.stdout.flush()
 
+def create_custom_mesh_preprocessor(device):
+    """Preprocessor to extract parameters from self-attention model and move to device."""
+    def preprocessor(model, name, ttnn_module_args, convert_to_ttnn):
+        parameters = {}
+        
+        # Query
+        query_weight = ttnn.as_tensor(model.query.weight)
+        query_weight = ttnn.to_device(query_weight, device)
+        query_bias = ttnn.as_tensor(model.query.bias)
+        query_bias = ttnn.to_device(query_bias, device)
+        parameters["query"] = {"weight": query_weight, "bias": query_bias}
+        
+        # Key
+        key_weight = ttnn.as_tensor(model.key.weight)
+        key_weight = ttnn.to_device(key_weight, device)
+        key_bias = ttnn.as_tensor(model.key.bias)
+        key_bias = ttnn.to_device(key_bias, device)
+        parameters["key"] = {"weight": key_weight, "bias": key_bias}
+        
+        # Value
+        value_weight = ttnn.as_tensor(model.value.weight)
+        value_weight = ttnn.to_device(value_weight, device)
+        value_bias = ttnn.as_tensor(model.value.bias)
+        value_bias = ttnn.to_device(value_bias, device)
+        parameters["value"] = {"weight": value_weight, "bias": value_bias}
+        
+        # Layer Norm
+        ln_weight = ttnn.as_tensor(model.layer_norm.weight)
+        ln_weight = ttnn.to_device(ln_weight, device)
+        ln_bias = ttnn.as_tensor(model.layer_norm.bias)
+        ln_bias = ttnn.to_device(ln_bias, device)
+        parameters["layer_norm"] = {"weight": ln_weight, "bias": ln_bias}
+        
+        # SR (if exists)
+        if hasattr(model, 'sr'):
+            sr_weight = ttnn.as_tensor(model.sr.weight)
+            sr_weight = ttnn.to_device(sr_weight, device)
+            sr_bias = ttnn.as_tensor(model.sr.bias)
+            sr_bias = ttnn.to_device(sr_bias, device)
+            parameters["sr"] = {"weight": sr_weight, "bias": sr_bias}
+        
+        return parameters
+    return preprocessor
+
 
 def create_test_parameters(device, hidden_size, num_attention_heads, sequence_reduction_ratio):
     parameters = {}

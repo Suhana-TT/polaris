@@ -9,34 +9,20 @@ class Conv:
         conv_params,
         parameters,
         *,
-        act_block_h=None,
-        reshard=False,
-        deallocate=True,
-        height_sharding=True,
-        activation=None,
-        groups=1,
+        groups=1,  # Must accept groups parameter
         dtype=ttnn.bfloat8_b,
         output_layout=ttnn.TILE_LAYOUT,
     ) -> None:
         self.weights = parameters["weight"]
         self.bias = parameters["bias"]
-        
         self.kernel_size = (self.weights.shape[2], self.weights.shape[3])
         self.conv_params = conv_params
         self.out_channels = self.weights.shape[0]
-        self.act_block_h = act_block_h
-        self.reshard = reshard
-        self.deallocate = deallocate
-        self.activation = activation
-        self.groups = groups
+        self.groups = groups  # MUST store groups
         self.dtype = dtype
-        self.shard_layout = (
-            ttnn.TensorMemoryLayout.HEIGHT_SHARDED if height_sharding else ttnn.TensorMemoryLayout.BLOCK_SHARDED
-        )
         self.output_layout = output_layout
 
     def __call__(self, device, input_tensor):
-        # Input is NCHW format for ttsim conv2d
         batch_size = input_tensor.shape[0]
         in_channels = input_tensor.shape[1]
         input_height = input_tensor.shape[2]
@@ -47,11 +33,9 @@ class Conv:
         pad_h = self.conv_params[2]
         pad_w = self.conv_params[3]
 
-        # Calculate output dimensions
         out_height = (input_height + 2 * pad_h - self.kernel_size[0]) // stride_h + 1
         out_width = (input_width + 2 * pad_w - self.kernel_size[1]) // stride_w + 1
 
-        # Perform conv2d
         output_tensor = ttnn.conv2d(
             input_tensor=input_tensor,
             weight_tensor=self.weights,
@@ -65,7 +49,7 @@ class Conv:
             stride=(stride_h, stride_w),
             padding=(pad_h, pad_w),
             dilation=(1, 1),
-            groups=self.groups,
+            groups=self.groups,  # MUST pass groups here
             device=device,
             dtype=self.dtype,
         )

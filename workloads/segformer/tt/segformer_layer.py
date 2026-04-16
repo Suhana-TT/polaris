@@ -1,120 +1,129 @@
-# SPDX-FileCopyrightText: (C) 2025 Tenstorrent AI ULC
+# SPDX-FileCopyrightText: © 2026 Tenstorrent AI ULC
 # SPDX-License-Identifier: Apache-2.0
-
 import os
 import sys
-from typing import Any, Tuple
+sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
+import ttsim.front.ttnn as ttnn
+from workloads.segformer.tt.segformer_attention import TtSegformerAttention
+from workloads.segformer.tt.segformer_mix_ffn import TtSegformerMixFFN
 
-repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-if repo_root not in sys.path:
-    sys.path.insert(0, repo_root)
-
-import ttsim.front.functional.tensor_op as T
-import ttsim.front.functional.op as F
-from workloads.segformer.tt.segformer_attention import TtsimSegformerAttention
-from workloads.segformer.tt.segformer_mix_ffn import TtsimSegformerMixFFN
-
-class TtsimSegformerLayer:
-    """Polaris SegFormer layer: LN -> Attention -> residual -> LN -> MixFFN -> residual."""
-
-    def __init__(
-        self,
-        name: str,
-        config: Any,
-        hidden_size: int,
-        num_attention_heads: int,
-        sequence_reduction_ratio: int,
-        parameters: Any,
-        mlp_ratio: int,
-    ):
+class TtSegformerLayer:
+    def __init__(self, name, hidden_size, num_attention_heads, sequence_reduction_ratio, parameters, mlp_ratio):
         self.name = name
         self.hidden_size = hidden_size
+        self.num_attention_heads = num_attention_heads
+        self.sequence_reduction_ratio = sequence_reduction_ratio
         self.mlp_ratio = mlp_ratio
-        self.config = config
-
+        self.parameters = parameters
         
-        self.ln_1_w = T.SimTensor(
-            {
-                "name": f"{name}_ln_1_w",
-                "data": parameters["layer_norm_1"]["weight"].reshape(1, 1, 1, hidden_size),
-                "shape": [1, 1, 1, hidden_size],
-                "dtype": "float32",
-            }
-        )
-        self.ln_1_b = T.SimTensor(
-            {
-                "name": f"{name}_ln_1_b",
-                "data": parameters["layer_norm_1"]["bias"].reshape(1, 1, 1, hidden_size),
-                "shape": [1, 1, 1, hidden_size],
-                "dtype": "float32",
-            }
-        )
-
-        self.attention = TtsimSegformerAttention(
+        # Attention submodule
+        self.attention = TtSegformerAttention(
             name=f"{self.name}_attention",
             hidden_size=hidden_size,
             num_attention_heads=num_attention_heads,
             parameters=parameters["attention"],
             sequence_reduction_ratio=sequence_reduction_ratio,
         )
-
-        self.ln_2_w = T.SimTensor(
-            {
-                "name": f"{name}_ln_2_w",
-                "data": parameters["layer_norm_2"]["weight"].reshape(1, 1, 1, hidden_size),
-                "shape": [1, 1, 1, hidden_size],
-                "dtype": "float32",
-            }
-        )
-        self.ln_2_b = T.SimTensor(
-            {
-                "name": f"{name}_ln_2_b",
-                "data": parameters["layer_norm_2"]["bias"].reshape(1, 1, 1, hidden_size),
-                "shape": [1, 1, 1, hidden_size],
-                "dtype": "float32",
-            }
-        )
-
+        
+        # MLP submodule
         mlp_hidden_size = int(hidden_size * mlp_ratio)
-        self.mlp = TtsimSegformerMixFFN(
+        self.mlp = TtSegformerMixFFN(
             name=f"{self.name}_mlp",
-            config=config,
+            parameters=parameters["mlp"],
+            config=None,
             in_features=hidden_size,
             hidden_features=mlp_hidden_size,
             out_features=hidden_size,
-            parameters=parameters["mlp"],
         )
-
-    def __call__(self, hidden_states: Any, height: int, width: int, output_attentions: bool = False) -> Tuple[Any, ...]:
-        # hidden_states expected as [B, 1, S, C]
-
-        # Pre-attention LayerNorm
-        ln_1_out = F.LayerNorm(f"{self.name}_ln1", self.hidden_size)(hidden_states)
-        ln_1_out = F.Mul(f"{self.name}_ln1_mul")(ln_1_out, self.ln_1_w)
-        ln_1_out = F.Add(f"{self.name}_ln1_add")(ln_1_out, self.ln_1_b)
-
-        # Attention
+        
+    def __call__(self, device, hidden_states, height: int, width: int, output_attentions=False):
+        """
+        Forward pass: 
+        1. LayerNorm -> Attention -> Residual
+        2. LayerNorm -> MLP -> Residual
+        
+        Args:
+            device: Device handle
+            hidden_states: Input tensor [batch, seq_len, hidden_size] or [batch, height, width, channels]
+            height: Spatial height
+            width: Spatial width
+            output_attentions: Whether to return attention weights
+            
+        Returns:
+            tuple: (layer_output, [attention_weights if output_attentions])
+        """
+        # Get input shape info
+        input_shape = hidden_states.shape
+        batch_size = input_shape[0]
+        
+        # Determine if input is 4D (from patch embedding) or 3D (sequence format)
+        is_4d_input = len(input_shape) == 4
+        
+        if is_4d_input:
+            # Input is [batch, height, width, channels]
+            num_channels = input_shape[3]
+            seq_len = height * width
+            # Flatten to [batch, seq_len, channels] for processing
+            hidden_states_3d = ttnn.reshape(hidden_states, (batch_size, seq_len, num_channels))
+        else:
+            # Input is already [batch, seq_len, hidden_size]
+            hidden_states_3d = hidden_states
+            seq_len = input_shape[1]
+        
+        # --- Attention Block ---
+        # Layer norm 1
+        normalized_hidden_states = ttnn.layer_norm(
+            hidden_states_3d,
+            weight=self.parameters["layer_norm_1"]["weight"],
+            bias=self.parameters["layer_norm_1"]["bias"],
+        )
+        
+        # Self-attention
         self_attention_outputs = self.attention(
-            ln_1_out,
+            normalized_hidden_states,    # hidden_states (positional)
+            height,                      # height (positional)
+            width,                       # width (positional)
+            output_attentions=output_attentions,  # keyword
+            device=device, 
+        )
+        
+        attention_output = self_attention_outputs[0]
+        outputs = self_attention_outputs[1:]  # attention weights if output_attentions=True
+        
+        # Ensure attention_output has correct shape for residual
+        attention_output_shape = attention_output.shape
+        if len(attention_output_shape) == 4:
+            # Attention output is [1, 1, seq_len, hidden] - reshape to [batch, seq_len, hidden]
+            attention_output = ttnn.reshape(attention_output, (batch_size, seq_len, self.hidden_size))
+        
+        # Residual connection (both should be [batch, seq_len, hidden_size])
+        hidden_states_3d = ttnn.add(attention_output, hidden_states_3d)
+        
+        # --- MLP Block ---
+        # Layer norm 2
+        normalized_hidden_states = ttnn.layer_norm(
+            hidden_states_3d,
+            weight=self.parameters["layer_norm_2"]["weight"],
+            bias=self.parameters["layer_norm_2"]["bias"],
+        )
+        
+        # MLP (Feed-forward)
+        mlp_output = self.mlp(
+            device,
+            normalized_hidden_states,
             height,
             width,
-            output_attentions=output_attentions,
         )
-        attention_output = self_attention_outputs[0]
-        outputs = self_attention_outputs[1:]
-
-        # First residual
-        hidden_states = F.Add(f"{self.name}_res_1")(attention_output, hidden_states)
-
-        # Pre-MLP LayerNorm
-        ln_2_out = F.LayerNorm(f"{self.name}_ln2", self.hidden_size)(hidden_states)
-        ln_2_out = F.Mul(f"{self.name}_ln2_mul")(ln_2_out, self.ln_2_w)
-        ln_2_out = F.Add(f"{self.name}_ln2_add")(ln_2_out, self.ln_2_b)
-
-        # MixFFN
-        mlp_output = self.mlp(ln_2_out, height, width)
-
-        # Second residual
-        layer_output = F.Add(f"{self.name}_res_2")(mlp_output, hidden_states)
-
-        return (layer_output,) + outputs
+        
+        # Ensure mlp_output has correct shape for residual
+        mlp_output_shape = mlp_output.shape
+        if len(mlp_output_shape) == 4:
+            # MLP output might be [1, 1, seq_len, hidden] - reshape to [batch, seq_len, hidden]
+            mlp_output = ttnn.reshape(mlp_output, (batch_size, seq_len, self.hidden_size))
+        
+        # Residual connection
+        layer_output = ttnn.add(mlp_output, hidden_states_3d)
+        
+        # Return output (keep as 3D [batch, seq_len, hidden_size])
+        outputs = (layer_output,) + outputs
+        return outputs

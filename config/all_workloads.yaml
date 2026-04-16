@@ -313,16 +313,16 @@ workloads:
       vit_b16: { bs: 1, model_name: vit-b16 }
       vit_base_224x224: { bs: 1, model_name: vit-b16 }
 
-  - api: TTSIM    
+  - api: TTNN
     name: segformer_semantic
     basedir: workloads/segformer/tests
-    module: run_tests@test_segformer_for_semantic_segmentation.py
+    module: run_all_tests@test_segformer_for_semantic_segmentation.py
     instances:
-      segformer_b0: { bs: 1, image_height: 512, image_width: 512 }
+      segformer_b0: { bs: 1, image_height: 512, image_width: 512, num_labels: 150 }
 
-  - api: TTSIM
+  - api: TTNN
     name: segformer_classification
     basedir: workloads/segformer/tests
-    module: run_tests@test_segformer_for_image_classification.py
+    module: run_all_tests@test_segformer_for_image_classification.py
     instances:
-      segformer_b0: { bs: 1, image_height: 512, image_width: 512}
+      segformer_b0: { bs: 1, image_height: 224, image_width: 224, num_labels: 1000 }

@@ -1,89 +1,95 @@
-# SPDX-FileCopyrightText: (C) 2025 Tenstorrent AI ULC
+# SPDX-FileCopyrightText: © 2025 Tenstorrent AI ULC
 # SPDX-License-Identifier: Apache-2.0
 
-import os
-import sys
-import numpy as np
-from typing import Any, Optional, Tuple, Union
+from dataclasses import dataclass
+from typing import Optional, Tuple, Union
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+import ttsim.front.ttnn as ttnn
+from workloads.segformer.tt.segformer_encoder import TtSegformerEncoder
 
-import ttsim.front.functional.tensor_op as T
-import ttsim.front.functional.op as F
-from workloads.segformer.tt.segformer_encoder import TtsimSegformerEncoder, TtsimBaseModelOutput
 
-class TtsimSegformerModel:
-    def __init__(self, name: str, config: Any, parameters: Any) -> None:
-        self.name = name
+@dataclass
+class TtBaseModelOutput:
+    last_hidden_state: ttnn.Tensor = None
+    hidden_states: tuple = None
+    attentions: tuple = None
+    
+    def __getitem__(self, idx):
+        if idx == 0:
+            return self.last_hidden_state
+        elif idx == 1:
+            return self.hidden_states
+        elif idx == 2:
+            return self.attentions
+        else:
+            raise IndexError("Index out of range")
+
+
+class TtSegformerModel:
+    def __init__(self, config, parameters):
         self.config = config
-
-        self.encoder = TtsimSegformerEncoder(
-            name=f"{self.name}_encoder",
-            config=config,
-            parameters=parameters["encoder"],
-        )
-
-        # pre-create transpose + concat op
-        self.pad_concat = F.ConcatX(f"{self.name}_pad_concat", axis=1)
-        self.to_nhwc = F.Transpose(f"{self.name}_to_nhwc", perm=[0, 2, 3, 1])
-
-    def _make_const_tensor(self, name: str, data: np.ndarray, dtype: str = "float32") -> T.SimTensor:
-        return T.SimTensor(
-            {
-                "name": name,
-                "data": data.astype(np.float32),
-                "shape": list(data.shape),
-                "dtype": dtype,
-            }
-        )
-
+        
+        # Hierarchical Transformer encoder
+        self.encoder = TtSegformerEncoder(config, parameters["encoder"])
+    
     def __call__(
         self,
-        pixel_values: Any,
+        device,
+        pixel_values: ttnn.Tensor,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-        min_channels: int = 8,
-    ) -> Union[Tuple[Any, ...], TtsimBaseModelOutput]:
-
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+    ) -> Union[Tuple, TtBaseModelOutput]:
+        """
+        Forward pass through the Segformer model.
+        
+        Args:
+            device: Device handle
+            pixel_values: Input tensor [batch, channels, height, width] (NCHW format)
+            output_attentions: Whether to output attention weights
+            output_hidden_states: Whether to output all hidden states
+            return_dict: Whether to return a dataclass instead of tuple
+            
+        Returns:
+            TtBaseModelOutput or tuple containing:
+                - last_hidden_state: Final encoder hidden state
+                - hidden_states: All hidden states (if output_hidden_states=True)
+                - attentions: All attention weights (if output_attentions=True)
+        """
+        # Handle default values from config
+        output_attentions = (
+            output_attentions if output_attentions is not None 
+            else getattr(self.config, 'output_attentions', False)
         )
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
-        shape = list(pixel_values.shape)
-        if len(shape) != 4:
-            raise ValueError(f"{self.name}: expected NCHW input [B, C, H, W], got {shape}")
-
-        N, C, H, W = shape
-        x = pixel_values
-
-        # match TT-Metal model.py: pad NCHW channels to min 8 before NHWC permute
-        if C < min_channels:
-            pad_c = min_channels - C
-            pad_tensor = self._make_const_tensor(
-                f"{self.name}_pad_zeros",
-                np.zeros((N, pad_c, H, W), dtype=np.float32),
-            )
-            x = self.pad_concat(x, pad_tensor)
-
-        # NCHW -> NHWC
-        x = self.to_nhwc(x)
-
+        output_hidden_states = (
+            output_hidden_states if output_hidden_states is not None 
+            else getattr(self.config, 'output_hidden_states', False)
+        )
+        return_dict = (
+            return_dict if return_dict is not None 
+            else getattr(self.config, 'use_return_dict', True)
+        )
+        
+        # Input is expected in NCHW format [batch, channels, height, width]
+        # The encoder handles the channel padding and format conversion internally
+        
+        # Pass through encoder
+        # Note: The encoder expects NCHW format and handles conversion internally
         encoder_outputs = self.encoder(
-            x,
+            device,
+            pixel_values,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
-
+        
+        sequence_output = encoder_outputs[0]
+        
         if not return_dict:
-            sequence_output = encoder_outputs[0]
             return (sequence_output,) + encoder_outputs[1:]
-
-        return TtsimBaseModelOutput(
-            last_hidden_state=encoder_outputs.last_hidden_state,
+        
+        return TtBaseModelOutput(
+            last_hidden_state=sequence_output,
             hidden_states=encoder_outputs.hidden_states,
             attentions=encoder_outputs.attentions,
         )

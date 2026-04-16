@@ -10,7 +10,7 @@ if repo_root not in sys.path:
     sys.path.insert(0, repo_root)
 
 import ttsim.front.ttnn as ttnn
-from workloads.segformer.tt.segformer_attention import TtsimSegformerAttention
+from workloads.segformer.tt.segformer_attention import TtSegformerAttention  # Changed from TtsimSegformerAttention
 
 # Import preprocessors from other test files
 from workloads.segformer.tests.test_segformer_efficient_selfattention import (
@@ -20,22 +20,18 @@ from workloads.segformer.tests.test_segformer_selfoutput import (
     create_custom_mesh_preprocessor as create_preprocessor_selfoutput,
 )
 
-
 def create_polaris_tensor(numpy_array, device):
     """Convert numpy array to Polaris ttnn.Tensor and move to device."""
     tensor = ttnn.as_tensor(numpy_array.astype(np.float32))
     tensor = ttnn.to_device(tensor, device)
     return tensor
 
-
 # --- Mock Classes (Replace PyTorch models) ---
-
 class MockLinear:
     """Simulates torch.nn.Linear"""
     def __init__(self, in_features, out_features):
         self.weight = np.random.randn(out_features, in_features).astype(np.float32)
         self.bias = np.random.randn(out_features).astype(np.float32)
-
 
 class MockLayerNorm:
     """Simulates torch.nn.LayerNorm"""
@@ -43,13 +39,11 @@ class MockLayerNorm:
         self.weight = np.random.randn(hidden_size).astype(np.float32)
         self.bias = np.random.randn(hidden_size).astype(np.float32)
 
-
 class MockConv2d:
     """Simulates torch.nn.Conv2d"""
     def __init__(self, in_channels, out_channels, kernel_size):
         self.weight = np.random.randn(out_channels, in_channels, kernel_size, kernel_size).astype(np.float32)
         self.bias = np.random.randn(out_channels).astype(np.float32)
-
 
 class MockSelfAttention:
     """Simulates SegformerEfficientSelfAttention (model.self)"""
@@ -61,19 +55,16 @@ class MockSelfAttention:
         if sr > 1:
             self.sr = MockConv2d(hidden_size, hidden_size, sr)
 
-
 class MockSelfOutput:
     """Simulates SegformerSelfOutput (model.output)"""
     def __init__(self, hidden_size):
         self.dense = MockLinear(hidden_size, hidden_size)
-
 
 class MockSegformerAttention:
     """Simulates SegformerAttention (has .self and .output)"""
     def __init__(self, hidden_size, sr):
         self.self = MockSelfAttention(hidden_size, sr)
         self.output = MockSelfOutput(hidden_size)
-
 
 def create_custom_mesh_preprocessor(device):
     """
@@ -95,7 +86,6 @@ def create_custom_mesh_preprocessor(device):
     
     return preprocessor
 
-
 # --- PARAMETER LIST (Same as TT-Metal) ---
 test_cases = [
     # (hidden_size, num_attention_heads, sequence_reduction_ratio, batch_size, seq_len, height, width, block_i, attention_i)
@@ -109,15 +99,14 @@ test_cases = [
     (256, 8, 1, 1, 256, 16, 16, 3, 1),
 ]
 
-
 def test_segformer_attention():
     print("=== Starting Polaris Segformer Attention Verification ===")
     all_passed = True
-
+    
     # 1. Open device
     device = ttnn.open_device()
     print(f"Device opened: {device}")
-
+    
     for params in test_cases:
         hidden_size, num_attention_heads, sequence_reduction_ratio, batch_size, seq_len, height, width, block_i, attention_i = params
         
@@ -136,7 +125,7 @@ def test_segformer_attention():
             input_tensor = create_polaris_tensor(input_np, device)
             
             # 5. Initialize Polaris model
-            model = TtsimSegformerAttention(
+            model = TtSegformerAttention(  # Changed from TtsimSegformerAttention
                 name=f"attention_{block_i}_{attention_i}",
                 hidden_size=hidden_size,
                 num_attention_heads=num_attention_heads,
@@ -159,7 +148,6 @@ def test_segformer_attention():
                 out_shape = tuple(np.array(output).shape)
             
             # 9. Verify shape
-            # Output can be (batch, 1, seq_len, hidden) or (batch, seq_len, hidden)
             expected_shape_4d = (batch_size, 1, seq_len, hidden_size)
             expected_shape_3d = (batch_size, seq_len, hidden_size)
             
@@ -173,11 +161,11 @@ def test_segformer_attention():
             print(f"[ERROR]  {test_name} -> {str(e)}")
             traceback.print_exc()
             all_passed = False
-
+    
     # 10. Close device
     ttnn.close_device(device)
     print("Device closed.")
-
+    
     print("\n" + "="*50)
     if all_passed:
         print("✓ All Attention configurations passed!")
@@ -185,7 +173,6 @@ def test_segformer_attention():
         print("✗ Some tests failed.")
     
     return all_passed
-
 
 if __name__ == "__main__":
     success = test_segformer_attention()

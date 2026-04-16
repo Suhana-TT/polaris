@@ -3,7 +3,7 @@
 import ttsim.front.ttnn as ttnn
 
 
-class TtsimSegformerSelfOutput:
+class TtSegformerSelfOutput:
     def __init__(self, name, hidden_size, parameters):
         self.name = name
         self.hidden_size = hidden_size
