@@ -592,8 +592,14 @@ def _rand(shape, dtype, device=USE_DEFAULT_DEVICE):
 def zeros(shape, dtype, layout=Layout.DEFAULT, device=USE_DEFAULT_DEVICE):
     return Tensor(shape=shape, dtype=dtype, layout=layout, device=device, fill_value=0)
 
-def ones(*shape, dtype=None, layout=Layout.DEFAULT, device=USE_DEFAULT_DEVICE):
-    return Tensor(shape=shape, dtype=dtype, layout=layout, device=device, fill_value=1)
+def ones(*args, shape=None, dtype=None, layout=Layout.DEFAULT, device=USE_DEFAULT_DEVICE):
+    if shape is not None:
+        actual_shape = shape
+    elif len(args) == 1 and isinstance(args[0], (list, tuple)):
+        actual_shape = args[0]
+    else:
+        actual_shape = args
+    return Tensor(shape=actual_shape, dtype=dtype, layout=layout, device=device, fill_value=1)
 
 
 def full(shape, fill_value, dtype, layout, device):

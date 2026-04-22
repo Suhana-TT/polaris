@@ -602,13 +602,57 @@ def compute_batchnorm(iTList, op) -> np.ndarray:
 
     eps = op.attrs.get("epsilon", 1e-5)
 
+    # Build broadcast shape dynamically: [1, C, 1, 1, ...] for any rank >= 2
+    ndim = X.ndim
+    stat_shape = [1, -1] + [1] * (ndim - 2)
+
     # Normalize
-    X_normalized = (X - mean.reshape(1, -1, 1, 1)) / np.sqrt(
-        var.reshape(1, -1, 1, 1) + eps
+    X_normalized = (X - mean.reshape(stat_shape)) / np.sqrt(
+        var.reshape(stat_shape) + eps
     )
 
     # Scale and shift
-    return scale.reshape(1, -1, 1, 1) * X_normalized + bias.reshape(1, -1, 1, 1)
+    return scale.reshape(stat_shape) * X_normalized + bias.reshape(stat_shape)
+
+
+def _compute_conv1d_fast(X, W, B, strides, pads, dilations, group):
+    """
+    Vectorised 1-D convolution for 3-D inputs (N, C_in, L).
+
+    Uses np.einsum over kernel positions to avoid Python loops over spatial
+    positions.  Supports stride, padding, dilation and groups.
+    """
+    N, C_in, L = X.shape
+    C_out, C_per_group, K = W.shape
+
+    stride = strides[0]
+    pad = pads[0]      # symmetric: pads = [pad_left, pad_right]
+    dilation = dilations[0]
+
+    if pad > 0:
+        X = np.pad(X, ((0, 0), (0, 0), (pad, pad)), mode="constant")
+
+    K_eff = dilation * (K - 1) + 1
+    L_padded = X.shape[-1]
+    L_out = (L_padded - K_eff) // stride + 1
+
+    c_out_g = C_out // group
+    out = np.zeros((N, C_out, L_out), dtype=np.float32)
+
+    for g in range(group):
+        x_g = X[:, g * C_per_group: (g + 1) * C_per_group, :]  # [N, Cg_in, L_padded]
+        w_g = W[g * c_out_g: (g + 1) * c_out_g]                 # [Cg_out, Cg_in, K]
+        for k in range(K):
+            k_start = k * dilation
+            x_slice = x_g[:, :, k_start: k_start + L_out * stride: stride]  # [N, Cg_in, L_out]
+            out[:, g * c_out_g: (g + 1) * c_out_g, :] += np.einsum(
+                'nci,oc->noi', x_slice, w_g[:, :, k], optimize=True
+            )
+
+    if B is not None:
+        out = out + B.reshape(1, -1, 1)
+
+    return out
 
 
 def compute_conv2d(iTList, op) -> np.ndarray:
@@ -630,9 +674,13 @@ def compute_conv2d(iTList, op) -> np.ndarray:
     B = iTList[2].data if len(iTList) > 2 else None
 
     strides = op.attrs.get("strides", [1, 1])
-    pads = op.attrs.get("pads", [0, 0, 0, 0])  # [top, left, bottom, right]
+    pads = op.attrs.get("pads", [0, 0, 0, 0])
     dilations = op.attrs.get("dilations", [1, 1])
     group = op.attrs.get("group", 1)
+
+    # Route 3-D input (N, C, L) to the vectorised 1-D conv path
+    if X.ndim == 3:
+        return _compute_conv1d_fast(X, W, B, strides, pads, dilations, group)
 
     N, C_in, H_in, W_in = X.shape
     C_out, C_per_group, Kh, Kw = W.shape

@@ -545,3 +545,18 @@ workloads:
     module : ScaledYOLOv4Validation@scaled_yolov4_validation.py
     instances:
       yolov4-csp : {yaml_cfg_path: 'https://raw.githubusercontent.com/WongKinYiu/ScaledYOLOv4/refs/heads/yolov4-large/models/yolov4-csp.yaml', in_channels: 3, in_resolution: 640, bs: 1}
+    name: EALSS
+    basedir: workloads/EA-LSS
+    module : EALSS@ealss_ttsim.py
+    params :
+      imc           : 256
+      lic           : 384
+      num_views     : 6
+      camera_stream : true
+      lc_fusion     : true
+      se            : false
+      num_classes   : 10
+      num_proposals : 200
+      bs            : 1
+    instances:
+      ealss_nuscenes: { img_height: 256, img_width: 704 }
