@@ -698,6 +698,7 @@ class TtVADHead(SimNN.Module):
         map_conf = ttnn.Tensor(shape=(map_outputs_classes_shape[1], map_outputs_classes_shape[2], map_outputs_classes_shape[3]), dtype=ttnn.bfloat16, device=self.device, layout=ttnn.TILE_LAYOUT)
         map_pos = ttnn.Tensor(shape=(map_outputs_coords_bev_shape[1], map_outputs_coords_bev_shape[2], map_outputs_coords_bev_shape[3]), dtype=ttnn.bfloat16, device=self.device, layout=ttnn.TILE_LAYOUT)
         # # use the most close pts pos in each map inst as the inst's pos
+        assert map_pos.shape is not None
         batch, num_map = map_pos.shape[0], map_pos.shape[1]
         map_pos = ttnn.unsqueeze(map_pos, 2)  # [B, P, 1, 2]
         map_pos_shape = map_pos.shape

@@ -175,7 +175,8 @@ class TtBEVFormerEncoder(SimNN.Module):
         reference_points = ttnn.concat(x, y, z, axis=-1)
         reference_points.set_module(self)
         # ones = ttnn.ones_like(reference_points[..., :1])
-        ones = ttnn.ones(shape=reference_points[..., :1].shape, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
+        assert reference_points[..., :1].shape is not None
+        ones = ttnn.ones(*reference_points[..., :1].shape, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
         reference_points = ttnn.concat(reference_points, ones, axis=-1)
 
         reference_points = ttnn.permute(reference_points, (1, 0, 2, 3))  # [D, B, Q, 4]
@@ -206,7 +207,8 @@ class TtBEVFormerEncoder(SimNN.Module):
         # bev_mask = z > eps_tensor
         bev_mask = ttnn.compare(z, eps_tensor, 'greater')
 
-        ones_like = ttnn.ones(shape=reference_points_cam[..., 2:3].shape, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
+        assert reference_points_cam[..., 2:3].shape is not None
+        ones_like = ttnn.ones(*reference_points_cam[..., 2:3].shape, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
         dividend = reference_points_cam[..., 0:2]
         dividend = ttnn.Tensor(shape=dividend.shape, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT, data=dividend.data)
         divisor = ttnn.maximum(reference_points_cam[..., 2:3], ones_like * eps_tensor)

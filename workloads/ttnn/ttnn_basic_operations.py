@@ -41,7 +41,7 @@ def main():
             device=device,
         )
         tt_t3 = ttnn.ones(
-            shape=(32, 32),
+            32, 32,
             dtype=ttnn.bfloat16,
             layout=ttnn.TILE_LAYOUT,
             device=device,

@@ -312,3 +312,16 @@ workloads:
     instances:
       vit_b16: { bs: 1, model_name: vit-b16 }
       vit_base_224x224: { bs: 1, model_name: vit-b16 }
+  - api: TTSIM
+    name: DiffusionDrive
+    basedir: workloads/DiffusionDrive/navsim/agents/diffusiondrive
+    module : V2TransfuserModel@transfuser_model_v2_ttsim.py
+    params :
+      image_architecture: resnet34
+      lidar_architecture: resnet34
+      bs: 1
+    instances:
+      dd_base  : { camera_height: 256, camera_width: 1024, lidar_h: 256, lidar_w: 256 }
+      dd_small : { camera_height: 256, camera_width: 256, lidar_h: 256, lidar_w: 256 }
+
+

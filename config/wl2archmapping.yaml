@@ -51,7 +51,7 @@ op_rsrc_spec:
              Gather, GatherND, Gelu, GlobalAveragePool, GridSample, Greater, GroupNormalization,
              HardSigmoid, Hardswish,
              Identity, If, IsNaN,
-             LayerNormalization, LeakyRelu, Log,
+             LayerNormalization, LeakyRelu, Log, Less,
              Max, MaxPool, Mean, Min, Mish, Mul,
              Neg, NonMaxSuppression, NonZero,
              Pad, Permute, Pow,

@@ -82,10 +82,10 @@ def inverse_sigmoid(x, eps: float = 1e-5):
     x = ttnn.clamp(x, min=0, max=1)
     x1 = ttnn.clamp(x, min=eps)
     if len(x.shape) == 3:
-        x_temp = ttnn.ones(shape=[x.shape[0], x.shape[1], x.shape[2]], dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=x.device)
+        x_temp = ttnn.ones(x.shape[0], x.shape[1], x.shape[2], dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=x.device)
     else:
         x_temp = ttnn.ones(
-            shape=[x.shape[0], x.shape[1], x.shape[2], x.shape[3]], dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=x.device
+            x.shape[0], x.shape[1], x.shape[2], x.shape[3], dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=x.device
         )
     x_temp = x_temp - x
     x2 = ttnn.clamp(x_temp, min=eps)

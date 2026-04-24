@@ -18,6 +18,36 @@ exclude = "^__.*/|^tests/|ttsim/back/tensix_neo|ttsim/front/llk|/reference/|^wor
 # disallow_untyped_defs = true
 warn_unreachable = true
 allow_untyped_globals = true
+[[tool.mypy.overrides]]
+module = [
+    "nuplan",
+    "nuplan.*",
+    "nuplan.*.*",
+    "nuplan.*.*.*",
+    "nuplan.*.*.*.*",
+    "nuplan.*.*.*.*.*",
+    "ray",
+    "ray.*",
+    "pytorch_lightning",
+    "pytorch_lightning.*",
+    "pyquaternion",
+    "pyquaternion.*",
+    "hydra",
+    "hydra.*",
+    "hydra.*.*",
+    "omegaconf",
+    "omegaconf.*",
+    "shapely",
+    "shapely.*",
+    "shapely.*.*",
+    "pandas",
+    "pandas.*",
+    "tqdm",
+    "tqdm.*",
+    "psutil",
+    "psutil.*",
+]
+ignore_missing_imports = true
 
 [tool.coverage.run]
 branch = true
