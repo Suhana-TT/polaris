@@ -49,7 +49,7 @@ MapTracker/
 │           └── query_update.py
 │
 └── reference/
-    ├── comparison_bevformer/
+    ├── comparison_backbones/
     │   ├── run_all.py
     │   ├── comparison_results.md
     │   ├── test_bevformer_backbone.py
@@ -123,7 +123,7 @@ Validates that the **ttsim** (TensTorrent Simulator) implementation produces out
 
 ```bash
 # BEVFormer backbone & encoder modules
-python -m workloads.MapTracker.reference.comparison_bevformer.run_all
+python -m workloads.MapTracker.reference.comparison_backbones.run_all
 
 # Detection & segmentation heads
 python -m workloads.MapTracker.reference.comparison_heads.run_all
@@ -147,7 +147,7 @@ python -m workloads.MapTracker.reference.comparison_utils.run_all
 ### Run Individual Module Validation
 
 ```bash
-python -m workloads.MapTracker.reference.comparison_bevformer.test_transformer
+python -m workloads.MapTracker.reference.comparison_backbones.test_transformer
 
 python -m workloads.MapTracker.reference.comparison_heads.test_map_seg_head
 

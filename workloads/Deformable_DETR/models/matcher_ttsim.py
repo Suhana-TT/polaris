@@ -226,6 +226,7 @@ class HungarianMatcher(SimNN.Module):
         pred_boxes.set_module(self)
         self._tensors[pred_boxes.name] = pred_boxes
 
+        assert pred_logits.shape is not None
         bs, num_queries = pred_logits.shape[:2]
 
         # Early return for shape-only mode (no data)
