@@ -108,7 +108,20 @@ def bbox_xyxy_to_cxcywh(bbox):
 
 
 def bbox_cxcywh_to_xyxy(bbox):
-    cx, cy, w, h = ttnn.split(bbox, (1, 1, 1, 1), dim=-1)
+    # Calculate output shape for split
+    bbox_shape = list(bbox.shape)
+    output_shape = bbox_shape[:-1] + [1]  # Last dim becomes 1
+
+    # Create output template
+    output_template = ttnn.Tensor(
+        shape=output_shape,
+        dtype=ttnn.bfloat16,
+        device=bbox.device,
+        layout=ttnn.Layout.TILE_LAYOUT,
+    )
+
+    # Split into 4 parts
+    cx, cy, w, h = ttnn.split(bbox, output_template, num_outputs=4, dim=-1)
 
     bbox_new = [ttnn.multiply((cx - 0.5), w), ttnn.multiply((cy - 0.5), h), ttnn.multiply((cx + 0.5), w), ttnn.multiply((cy + 0.5), h)]
     return ttnn.concat(bbox_new, dim=-1)

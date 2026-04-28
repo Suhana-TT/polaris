@@ -7,7 +7,6 @@ import numpy as np
 import copy
 import warnings
 import os, sys
-from turtle import shape
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../../../'))
 import ttsim.front.ttnn as ttnn
 import ttsim.front.functional.sim_nn as SimNN
