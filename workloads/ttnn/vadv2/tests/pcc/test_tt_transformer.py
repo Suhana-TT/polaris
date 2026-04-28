@@ -753,7 +753,6 @@ def test_vadv2_transformer(device=mesh_device):
         ttnn_outputs[5].shape == [1, 2000, 2] and
         ttnn_outputs[6].shape == [3, 1, 2000, 2]):
         logger.debug("Test passed: Output shapes are as expected.")
-        return 0
     else:
         raise AssertionError("Test failed: Output shapes are not as expected.")
 

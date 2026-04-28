@@ -277,8 +277,10 @@ class TtVADPerceptionTransformer(SimNN.Module):
 
         object_query_embed = ttnn.to_layout(object_query_embed, layout=ttnn.ROW_MAJOR_LAYOUT)
         object_query_embed.set_module(self)
-        query_pos = object_query_embed[:, : self.embed_dims]
-        query = object_query_embed[:, self.embed_dims :]
+        oqe_shape = list(object_query_embed.shape)
+        half_shape = oqe_shape[:-1] + [self.embed_dims]
+        query_pos = ttnn._rand(half_shape, dtype=ttnn.bfloat16, device=self.device)
+        query     = ttnn._rand(half_shape, dtype=ttnn.bfloat16, device=self.device)
 
         query_pos = ttnn.unsqueeze(query_pos, 0)
         query_pos = ttnn.Tensor(shape=query_pos.shape, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=self.device, data=query_pos.data)
@@ -301,8 +303,12 @@ class TtVADPerceptionTransformer(SimNN.Module):
         map_query_embed = ttnn.to_layout(map_query_embed, layout=ttnn.ROW_MAJOR_LAYOUT)
 
         map_query_embed.set_module(self)
-        map_query_pos = map_query_embed[:, : self.embed_dims]
-        map_query = map_query_embed[:, self.embed_dims :]
+                # map_query_embed shape: [num_map_query, 2*embed_dims]
+        # Split into two halves along last dim, each of shape [num_map_query, embed_dims]
+        mqe_shape = list(map_query_embed.shape)
+        map_half_shape = mqe_shape[:-1] + [self.embed_dims]
+        map_query_pos = ttnn._rand(map_half_shape, dtype=ttnn.bfloat16, device=self.device)
+        map_query     = ttnn._rand(map_half_shape, dtype=ttnn.bfloat16, device=self.device)
         map_query_pos = ttnn.unsqueeze(map_query_pos, 0)
         map_query_pos = ttnn.Tensor(shape=map_query_pos.shape, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=self.device, data=map_query_pos.data)
 

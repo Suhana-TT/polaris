@@ -74,8 +74,8 @@ class TtTemporalSelfAttention(SimNN.Module):
         _, num_value, _ = value.shape
         assert self.num_bev_queue == 2
 
-        value.set_module(self)
-        slice_value_shape = value[:bs, :, :].shape
+        value_shape = list(value.shape)
+        slice_value_shape = [bs] + value_shape[1:]
         slice_value = ttnn._rand(slice_value_shape, dtype=ttnn.bfloat16, device=query.device)
         query = ttnn.concat(slice_value, query, axis=-1)
 
@@ -134,10 +134,9 @@ class TtTemporalSelfAttention(SimNN.Module):
 
         if reference_points.shape[-1] == 2:
             spatial_shapes.set_module(self)
-            slice_sp_s0 = spatial_shapes[..., 0].shape
-            slice_sp_s1 = spatial_shapes[..., 1].shape
-            sp_s1 = ttnn._rand(slice_sp_s1, dtype=ttnn.bfloat16, device=query.device)
-            sp_s0 = ttnn._rand(slice_sp_s0, dtype=ttnn.bfloat16, device=query.device)
+            sp_scalar_shape = list(spatial_shapes.shape)[:-1]
+            sp_s0 = ttnn._rand(sp_scalar_shape, dtype=ttnn.bfloat16, device=query.device)
+            sp_s1 = ttnn._rand(sp_scalar_shape, dtype=ttnn.bfloat16, device=query.device)
             offset_normalizer = ttnn.stack([sp_s0, sp_s1], dim=-1)
             bs_r, num_query, num_levels, _ = reference_points.shape
             reference_points_shape = reference_points.shape

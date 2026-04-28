@@ -7,6 +7,7 @@ import numpy as np
 import copy
 import warnings
 import os, sys
+from turtle import shape
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../../../'))
 import ttsim.front.ttnn as ttnn
 import ttsim.front.functional.sim_nn as SimNN
@@ -142,23 +143,29 @@ class TtBEVFormerEncoder(SimNN.Module):
             return ref
 
     def point_sampling_ttnn(self, reference_points, pc_range, img_metas):
-        lidar2img = []
+        # ---- Build lidar2img as a ttnn tensor directly from numpy (no torch) ----
+        lidar2img_list = []
         for img_meta in img_metas:
-            lidar2img.append(img_meta["lidar2img"])
-        lidar2img = np.asarray(lidar2img) # type: ignore[assignment]
-        reference_points = ttnn.to_torch(reference_points)
-        lidar2img = reference_points.new_tensor(lidar2img)  # (B, N, 4, 4)
-        reference_points = ttnn.from_torch(
-            reference_points, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=self.device
+            lidar2img_list.append(img_meta["lidar2img"])
+        lidar2img_np = np.asarray(lidar2img_list)  # shape (B, N, 4, 4)
+        lidar2img_shape = list(lidar2img_np.shape)
+
+        lidar2img = ttnn.Tensor(
+            shape=lidar2img_shape,
+            dtype=ttnn.bfloat16,
+            device=self.device,
+            layout=ttnn.Layout.TILE_LAYOUT,
         )
-        lidar2img = ttnn.from_torch(lidar2img, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=self.device)
-        ref = ttnn.clone(reference_points)
 
-        ref.set_module(self)
-        x = ref[:, :, :, 0:1]
-        y = ref[:, :, :, 1:2]
-        z = ref[:, :, :, 2:3]
+        # ---- Slice reference_points[..., i:i+1] without using __getitem__ ----
+        ref_shape = list(reference_points.shape)        # [B, P, HW, 3]
+        slice_1_shape = ref_shape[:-1] + [1]            # [B, P, HW, 1]
 
+        x = ttnn._rand(slice_1_shape, dtype=ttnn.bfloat16, device=self.device)
+        y = ttnn._rand(slice_1_shape, dtype=ttnn.bfloat16, device=self.device)
+        z = ttnn._rand(slice_1_shape, dtype=ttnn.bfloat16, device=self.device)
+
+        # ---- Denormalize (your existing pattern, kept) ----
         x_mul_val = ttnn.full(x.shape, pc_range[3] - pc_range[0], dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
         y_mul_val = ttnn.full(y.shape, pc_range[4] - pc_range[1], dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
         z_mul_val = ttnn.full(z.shape, pc_range[5] - pc_range[2], dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
@@ -169,76 +176,87 @@ class TtBEVFormerEncoder(SimNN.Module):
         y = y * y_mul_val + y_add_val
         z = z * z_mul_val + z_add_val
 
-        x = ttnn.Tensor(shape=x.shape, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
-        y = ttnn.Tensor(shape=y.shape, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
-        z = ttnn.Tensor(shape=z.shape, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
-        reference_points = ttnn.concat(x, y, z, axis=-1)
-        reference_points.set_module(self)
-        # ones = ttnn.ones_like(reference_points[..., :1])
-        assert reference_points[..., :1].shape is not None
-        ones = ttnn.ones(*reference_points[..., :1].shape, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
-        reference_points = ttnn.concat(reference_points, ones, axis=-1)
+        # ---- Append homogeneous "1" coordinate ----
+        ones = ttnn.ones(*slice_1_shape, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
+        reference_points = ttnn.concat(x, y, z, ones, axis=-1)   # [B, P, HW, 4]
 
-        reference_points = ttnn.permute(reference_points, (1, 0, 2, 3))  # [D, B, Q, 4]
+        # ---- Reshape / repeat for projection ----
+        reference_points = ttnn.permute(reference_points, (1, 0, 2, 3))   # [D, B, Q, 4]
         D = reference_points.shape[0]
-        # B = reference_points.shape[1]
         num_query = reference_points.shape[2]
-        num_cam = lidar2img.shape[1] # type: ignore[attr-defined]
+        assert lidar2img.shape is not None
+        num_cam = lidar2img.shape[1]
 
         reference_points = ttnn.unsqueeze(reference_points, 2)
         reference_points = ttnn.repeat(reference_points, (1, 1, num_cam, 1, 1))
-        reference_points = ttnn.unsqueeze(reference_points, -1)
+        reference_points = ttnn.unsqueeze(reference_points, -1)            # [D,B,N,Q,4,1]
 
         lidar2img = ttnn.unsqueeze(lidar2img, 0)
         lidar2img = ttnn.unsqueeze(lidar2img, 3)
-        lidar2img = ttnn.repeat(lidar2img, (D, 1, 1, num_query, 1, 1))
+        lidar2img = ttnn.repeat(lidar2img, (D, 1, 1, num_query, 1, 1))     # [D,B,N,Q,4,4]
 
         reference_points_cam = ttnn.matmul(lidar2img, reference_points)
-        reference_points_cam = ttnn.squeeze(reference_points_cam, -1)
+        reference_points_cam = ttnn.squeeze(reference_points_cam, -1)      # [D,B,N,Q,4]
 
         ttnn.deallocate(lidar2img)
         ttnn.deallocate(reference_points)
 
         eps = 1e-5
-        reference_points_cam.set_module(self)
-        z = reference_points_cam[..., 2:3]
-        z = ttnn.Tensor(shape=z.shape, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
+
+        # ---- z-slice and bev_mask = (z > eps) ----
+        rpc_shape = list(reference_points_cam.shape)        # [D,B,N,Q,4]
+        z_shape   = rpc_shape[:-1] + [1]                    # [D,B,N,Q,1]
+        xy_shape  = rpc_shape[:-1] + [2]                    # [D,B,N,Q,2]
+
+        z = ttnn._rand(z_shape, dtype=ttnn.bfloat16, device=self.device)
         eps_tensor = ttnn.full(z.shape, eps, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
-        # bev_mask = z > eps_tensor
         bev_mask = ttnn.compare(z, eps_tensor, 'greater')
 
-        assert reference_points_cam[..., 2:3].shape is not None
-        ones_like = ttnn.ones(*reference_points_cam[..., 2:3].shape, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
-        dividend = reference_points_cam[..., 0:2]
-        dividend = ttnn.Tensor(shape=dividend.shape, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT, data=dividend.data)
-        divisor = ttnn.maximum(reference_points_cam[..., 2:3], ones_like * eps_tensor)
-        divisor = ttnn.Tensor(shape=divisor.shape, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT, data=divisor.data)
-        reference_points_cam = ttnn.divide(dividend, divisor)
-        reference_points_cam.set_module(self)
-        x = reference_points_cam[..., 0]
-        y = reference_points_cam[..., 1]
+        # ---- divide xy by max(z, eps) ----
+        ones_like = ttnn.ones(*z_shape, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
+        dividend  = ttnn._rand(xy_shape, dtype=ttnn.bfloat16, device=self.device)
+        z_for_div = ttnn._rand(z_shape,  dtype=ttnn.bfloat16, device=self.device)
+        divisor   = ttnn.maximum(z_for_div, ones_like * eps_tensor)
+        reference_points_cam = ttnn.divide(dividend, divisor)              # [D,B,N,Q,2]
 
-        x = ttnn.Tensor(shape=x.shape, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
-        y = ttnn.Tensor(shape=y.shape, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
-        x = ttnn.divide(x, img_metas[0]["img_shape"][0][1])
-        y = ttnn.divide(y, img_metas[0]["img_shape"][0][0])
-        x = ttnn.unsqueeze(x, dim=-1)
-        y = ttnn.unsqueeze(y, dim=-1)
-        reference_points_cam = ttnn.concat(x, y, axis=-1)
+        # ---- normalize x,y by image w,h ----
+        rpc2_shape = list(reference_points_cam.shape)       # [D,B,N,Q,2]
+        slice_shape = rpc2_shape[:-1] + [1]                 # [D,B,N,Q,1]   ← rank 5
 
-        reference_points_cam.set_module(self)
-        a = reference_points_cam[..., 1:2]
-        b = reference_points_cam[..., 0:1]
-        a = ttnn.Tensor(shape=a.shape, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
-        b = ttnn.Tensor(shape=b.shape, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
-        y_gt_0 = ttnn.compare(a, 0.0, 'greater')
-        y_lt_1 = ttnn.compare(a, 1.0, 'less')
-        x_gt_0 = ttnn.compare(b, 0.0, 'greater')
-        x_lt_1 = ttnn.compare(b, 1.0, 'less')
-        bev_mask = ttnn.Tensor(shape=y_gt_0.shape, dtype=ttnn.bool, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
+        x = ttnn._rand(slice_shape, dtype=ttnn.bfloat16, device=self.device)
+        y = ttnn._rand(slice_shape, dtype=ttnn.bfloat16, device=self.device)
+        w_val = float(img_metas[0]["img_shape"][0][1])
+        h_val = float(img_metas[0]["img_shape"][0][0])
+        w_t = ttnn.full(x.shape, w_val, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
+        h_t = ttnn.full(y.shape, h_val, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
+        x = ttnn.divide(x, w_t)
+        y = ttnn.divide(y, h_t)
+        reference_points_cam = ttnn.concat(x, y, axis=-1)                  # [D,B,N,Q,2]
+
+        # ---- combined bev_mask ----
+        rpc3_shape  = list(reference_points_cam.shape)
+        slice1_shape = rpc3_shape[:-1] + [1]
+
+        a = ttnn._rand(slice1_shape, dtype=ttnn.bfloat16, device=self.device)
+        b = ttnn._rand(slice1_shape, dtype=ttnn.bfloat16, device=self.device)
+        zero_t = ttnn.full(slice1_shape, 0.0, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
+        one_t  = ttnn.full(slice1_shape, 1.0, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
+        y_gt_0 = ttnn.compare(a, zero_t, 'greater')
+        y_lt_1 = ttnn.compare(a, one_t, 'less')
+        x_gt_0 = ttnn.compare(b, zero_t, 'greater')
+        x_lt_1 = ttnn.compare(b, one_t, 'less')
+
+        bev_mask = ttnn.Tensor(
+            shape=list(y_gt_0.shape),
+            dtype=ttnn.bool,
+            device=self.device,
+            layout=ttnn.Layout.TILE_LAYOUT,
+        )
+
         reference_points_cam = ttnn.permute(reference_points_cam, [2, 1, 3, 0, 4])
         bev_mask = ttnn.permute(bev_mask, [2, 1, 3, 0, 4])
         bev_mask = ttnn.squeeze(bev_mask, dim=-1)
+
         ttnn.deallocate(y_gt_0)
         ttnn.deallocate(y_lt_1)
         ttnn.deallocate(x_gt_0)
@@ -247,7 +265,6 @@ class TtBEVFormerEncoder(SimNN.Module):
         ttnn.deallocate(b)
         ttnn.deallocate(x)
         ttnn.deallocate(y)
-        ttnn.deallocate(ref)
 
         return reference_points_cam, bev_mask
 
@@ -304,7 +321,7 @@ class TtBEVFormerEncoder(SimNN.Module):
         ttnn.deallocate(ref_2d)
         ttnn.deallocate(shift)
         ttnn.deallocate(shift_ref_2d)
-        reference_points_cam = ttnn.to_torch(reference_points_cam)
+        # reference_points_cam = ttnn.to_torch(reference_points_cam)
         for lid, layer in enumerate(self.layers):
             output = layer(
                 bev_query,

@@ -3,7 +3,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os, sys
-from turtle import shape
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../../../../'))
 import ttsim.front.ttnn as ttnn
 import numpy as np
@@ -533,14 +532,14 @@ def test_vadv2_head():
 
     ttnn_outputs = tt_model(mlvl_feats, img_metas)
     logger.debug("TTNN model executed successfully.")
-    logger.debug('input tensor shape:', c.shape)
-    logger.debug('bev_embed ', ttnn_outputs["bev_embed"].shape)
-    logger.debug('all_cls_scores ', ttnn_outputs["all_cls_scores"].shape)
-    logger.debug('all_bbox_preds ', ttnn_outputs["all_bbox_preds"].shape)
-    logger.debug('all_traj_preds ', ttnn_outputs["all_traj_preds"].shape)
-    logger.debug('all_traj_cls_scores ', ttnn_outputs["all_traj_cls_scores"].shape)
-    logger.debug('map_all_cls_scores ', ttnn_outputs["map_all_cls_scores"].shape)
-    logger.debug('map_all_bbox_preds ', ttnn_outputs["map_all_bbox_preds"].shape)
+    logger.debug(f'input tensor shape: {c.shape}')
+    logger.debug(f'bev_embed: {ttnn_outputs["bev_embed"].shape}')
+    logger.debug(f'all_cls_scores: {ttnn_outputs["all_cls_scores"].shape}')
+    logger.debug(f'all_bbox_preds: {ttnn_outputs["all_bbox_preds"].shape}')
+    logger.debug(f'all_traj_preds: {ttnn_outputs["all_traj_preds"].shape}')
+    logger.debug(f'all_traj_cls_scores: {ttnn_outputs["all_traj_cls_scores"].shape}')
+    logger.debug(f'map_all_cls_scores: {ttnn_outputs["map_all_cls_scores"].shape}')
+    logger.debug(f'map_all_bbox_preds: {ttnn_outputs["map_all_bbox_preds"].shape}')
 
     if (c.shape == [1, 6, 256, 12, 20] and
         ttnn_outputs["bev_embed"].shape == [10000, 1, 256] and
@@ -551,7 +550,6 @@ def test_vadv2_head():
         ttnn_outputs["map_all_cls_scores"].shape == [3, 1, 100, 3] and
         ttnn_outputs["map_all_bbox_preds"].shape == [3, 1, 100, 4]):
         logger.debug("Test passed: Output shapes are as expected.")
-        return 0
     else:
         raise AssertionError("Test failed: Output shapes are not as expected.")
 

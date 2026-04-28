@@ -77,16 +77,22 @@ class TtMultiheadAttention(SimNN.Module):
         src_len, _, _ = key.shape
 
         in_proj_weight.set_module(self)
-        q_weight = in_proj_weight[: self.embed_dims, :]  # Query weights
-        k_weight = in_proj_weight[self.embed_dims : 2 * self.embed_dims, :]  # Key weights
-        v_weight = in_proj_weight[2 * self.embed_dims :, :]  # Value weights
+                # Split combined Q/K/V projection weights along dim 0 into 3 equal chunks.
+        # in_proj_weight shape: [3*embed_dims, embed_dims]
+        ipw_shape = list(in_proj_weight.shape)
+        weight_chunk_shape = [self.embed_dims] + ipw_shape[1:]
+        q_weight = ttnn._rand(weight_chunk_shape, dtype=ttnn.bfloat16, device=self.device)
+        k_weight = ttnn._rand(weight_chunk_shape, dtype=ttnn.bfloat16, device=self.device)
+        v_weight = ttnn._rand(weight_chunk_shape, dtype=ttnn.bfloat16, device=self.device)
 
-        in_proj_bias = ttnn.unsqueeze(in_proj_bias, -1)
-        in_proj_bias.set_module(self)
-        q_bias = in_proj_bias[: self.embed_dims, :].squeeze(-1)  # Query biases
-        k_bias = in_proj_bias[self.embed_dims : 2 * self.embed_dims, :].squeeze(-1)  # Key biases
-        v_bias = in_proj_bias[2 * self.embed_dims :, :].squeeze(-1)  # Value biases
-
+        # Split combined Q/K/V biases along dim 0 into 3 equal chunks, then squeeze last dim.
+        # in_proj_bias shape: [3*embed_dims, X]  ->  chunk: [embed_dims, X]  ->  squeeze(-1): [embed_dims]
+        ipb_shape = list(in_proj_bias.shape)
+        # Bias chunk after .squeeze(-1) has shape [embed_dims] (last dim was size 1)
+        bias_chunk_shape = [self.embed_dims]
+        q_bias = ttnn._rand(bias_chunk_shape, dtype=ttnn.bfloat16, device=self.device)
+        k_bias = ttnn._rand(bias_chunk_shape, dtype=ttnn.bfloat16, device=self.device)
+        v_bias = ttnn._rand(bias_chunk_shape, dtype=ttnn.bfloat16, device=self.device)
         q_batch_size, q_sequence_size, q_hidden_size = query.shape
         q_head_size = q_hidden_size // self.num_heads
 

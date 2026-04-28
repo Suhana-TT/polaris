@@ -29,9 +29,9 @@ def multi_scale_deformable_attn(value, value_spatial_shapes, sampling_locations,
         value_l_ = ttnn.permute(value_l_, (0, 2, 1))
         value_l_ = ttnn.reshape(value_l_, [bs * num_heads, embed_dims, H_, W_]) # int(H_.item()), int(W_.item())])
 
-        sampling_grids.set_module(module)
-        sampling_grid_l_ = sampling_grids[:, :, :, level]
-        sampling_grid_l_tensor_ = ttnn._rand(sampling_grid_l_.shape, dtype=ttnn.bfloat16, device=device)
+        sg_shape = list(sampling_grids.shape)
+        sampling_grid_l_shape = sg_shape[:3] + sg_shape[4:]
+        sampling_grid_l_tensor_ = ttnn._rand(sampling_grid_l_shape, dtype=ttnn.bfloat16, device=device)
         sampling_grid_l_ = ttnn.permute(sampling_grid_l_tensor_, (0, 2, 1, 3, 4))
 
         sampling_grid_l_ = ttnn.reshape(

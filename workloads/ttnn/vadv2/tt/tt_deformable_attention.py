@@ -116,8 +116,10 @@ class TtCustomMSDeformableAttention(SimNN.Module):
 
         if reference_points.shape[-1] == 2:
             spatial_shapes.set_module(self)
-            s1 = spatial_shapes[..., 1]
-            s0 = spatial_shapes[..., 0]
+            ss_scalar_shape = list(spatial_shapes.shape)[:-1]
+            s0 = ttnn._rand(ss_scalar_shape, dtype=ttnn.bfloat16, device=self.device)
+            s1 = ttnn._rand(ss_scalar_shape, dtype=ttnn.bfloat16, device=self.device)
+
             s1 = ttnn.Tensor(shape=s1.shape, dtype=ttnn.float32, layout=ttnn.ROW_MAJOR_LAYOUT, device=self.device, data=s1.data)
             s0 = ttnn.Tensor(shape=s0.shape, dtype=ttnn.float32, layout=ttnn.ROW_MAJOR_LAYOUT, device=self.device, data=s0.data)
             offset_normalizer = ttnn.stack([s1, s0], dim=-1)

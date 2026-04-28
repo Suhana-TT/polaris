@@ -615,7 +615,6 @@ def test_vadv2():
         ttnn_outputs[0]['pts_bbox']['map_labels_3d'].shape == [50] and
         ttnn_outputs[0]['pts_bbox']['ego_fut_cmd'].shape == [1, 1, 1, 3]):
         logger.debug("VADv2 test passed! Output shape is as expected.")
-        return 0
     else:
         raise AssertionError("VADv2 test failed.")
 

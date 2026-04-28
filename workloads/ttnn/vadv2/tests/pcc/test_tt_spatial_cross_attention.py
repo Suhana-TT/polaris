@@ -60,7 +60,6 @@ def test_vadv2_sca():
         logger.debug('TT Spatial Cross Attention Test Passed!')
         logger.debug(f'Input query shape: {query.shape}')
         logger.debug(f'TT output shape: {tt_output.shape}')
-        return 0
 
 if __name__ == "__main__":
     test_vadv2_sca()

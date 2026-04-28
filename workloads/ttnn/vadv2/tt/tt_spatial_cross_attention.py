@@ -66,10 +66,11 @@ class TtSpatialCrossAttention(SimNN.Module):
 
         D = reference_points_cam.size(3)
         indexes = []
-        bev_mask.set_module(self)
-        for i in range(bev_mask.size(0)):
-            mask_per_img = bev_mask[i, ...]
-            mask_per_img_tensor = ttnn._rand(mask_per_img.shape, dtype=ttnn.bfloat16, device=self.device)
+        
+        mask_per_img_shape = list(bev_mask.shape)[1:]
+        num_cams_iter = bev_mask.shape[0]
+        for i in range(num_cams_iter):
+            mask_per_img_tensor = ttnn._rand(mask_per_img_shape, dtype=ttnn.bfloat16, device=self.device)
             index_query_per_img = ttnn.sum(mask_per_img_tensor, dim=-1)
             index_query_per_img = ttnn.to_layout(index_query_per_img, ttnn.ROW_MAJOR_LAYOUT)
             for _ in range(3):  # unsqueeze 3 times
@@ -84,14 +85,20 @@ class TtSpatialCrossAttention(SimNN.Module):
                 index_query_per_img = ttnn.squeeze(index_query_per_img, 0)
             indexes.append(index_query_per_img)
 
-        query = ttnn.to_torch(query)
-        # each camera only interacts with its corresponding BEV queries. This step can  greatly save GPU memory.
-        queries_rebatch = query.new_zeros([bs, self.num_cams, indexes[0].shape[-1], self.embed_dims])
-        reference_points_cam.set_module(self)
-        reference_points_rebatch = reference_points_cam.new_zeros([bs, self.num_cams, indexes[0].shape[-1], D, 2])
-
-        queries_rebatch = ttnn.from_torch(queries_rebatch, dtype=ttnn.bfloat16, device=self.device)
-        reference_points_rebatch = ttnn.from_torch(reference_points_rebatch, dtype=ttnn.bfloat16, device=self.device)
+        # Allocate rebatched containers as ttnn tensors directly (no torch)
+        idx_len = indexes[0].shape[-1]
+        queries_rebatch = ttnn.zeros(
+            [bs, self.num_cams, idx_len, self.embed_dims],
+            dtype=ttnn.bfloat16,
+            device=self.device,
+            layout=ttnn.Layout.TILE_LAYOUT,
+        )
+        reference_points_rebatch = ttnn.zeros(
+            [bs, self.num_cams, idx_len, D, 2],
+            dtype=ttnn.bfloat16,
+            device=self.device,
+            layout=ttnn.Layout.TILE_LAYOUT,
+        )
         num_cams, l, bs, embed_dims = key.shape
         num_cams, l, bs, embed_dims = key.shape
 

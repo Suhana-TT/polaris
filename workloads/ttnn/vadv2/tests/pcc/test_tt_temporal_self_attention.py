@@ -52,7 +52,6 @@ def test_vadv2_tsa():
         raise AssertionError("Output shape does not match input query shape.")
     else:
         logger.debug('TT Temporal Self Attention Test Passed!')
-        return 0
 
 
 if __name__ == "__main__":
