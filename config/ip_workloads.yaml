@@ -565,3 +565,20 @@ workloads:
       bs               : 1
     instances:
       fusionad_validation : { bev_h: 25,  bev_w: 25,  img_height: 256,  img_width: 256  }
+    
+  - api: TTSIM
+    name: EA_LSS
+    basedir: workloads/EA_LSS
+    module : EA_LSS@ealss_ttsim.py
+    params :
+      imc           : 256
+      lic           : 384
+      num_views     : 6
+      camera_stream : true
+      lc_fusion     : true
+      se            : false
+      num_classes   : 10
+      num_proposals : 200
+      bs            : 1
+    instances:
+      ealss_nuscenes: { img_height: 256, img_width: 704 }
