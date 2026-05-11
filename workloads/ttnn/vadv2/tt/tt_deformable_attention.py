@@ -116,10 +116,10 @@ class TtCustomMSDeformableAttention(SimNN.Module):
 
         if reference_points.shape[-1] == 2:
             spatial_shapes.set_module(self)
-            s1 = spatial_shapes[..., 1]
-            s0 = spatial_shapes[..., 0]
-            s1 = ttnn.Tensor(shape=s1.shape, dtype=ttnn.float32, layout=ttnn.ROW_MAJOR_LAYOUT, device=self.device, data=s1.data)
-            s0 = ttnn.Tensor(shape=s0.shape, dtype=ttnn.float32, layout=ttnn.ROW_MAJOR_LAYOUT, device=self.device, data=s0.data)
+            num_levels = spatial_shapes.shape[0]  # This is 1
+            slice_shape = (num_levels,)  # Shape should be [1] for each column
+            s0 = ttnn.Tensor(shape=slice_shape, dtype=ttnn.float32, layout=ttnn.ROW_MAJOR_LAYOUT, device=self.device)
+            s1 = ttnn.Tensor(shape=slice_shape, dtype=ttnn.float32, layout=ttnn.ROW_MAJOR_LAYOUT, device=self.device)
             offset_normalizer = ttnn.stack([s1, s0], dim=-1)
             bs_r, num_query, num_levels, _ = reference_points.shape
             reference_xy = ttnn.reshape(reference_points, (bs_r, num_query, 1, num_levels, 1, 2))

@@ -211,8 +211,15 @@ class TtBEVFormerEncoder(SimNN.Module):
         ones_like = ttnn.ones(*reference_points_cam[..., 2:3].shape, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
         dividend = reference_points_cam[..., 0:2]
         dividend = ttnn.Tensor(shape=dividend.shape, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT, data=dividend.data)
-        divisor = ttnn.maximum(reference_points_cam[..., 2:3], ones_like * eps_tensor)
+        ref_slice = reference_points_cam[..., 2:3]
+        if not isinstance(ref_slice, ttnn.Tensor):
+            ref_slice = ttnn.Tensor(shape=ref_slice.shape, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT, data=ref_slice.data)
+        
+        divisor = ttnn.maximum(ref_slice, ones_like * eps_tensor)
         divisor = ttnn.Tensor(shape=divisor.shape, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT, data=divisor.data)
+        # DEBUG: Check types before the failing line
+    
+
         reference_points_cam = ttnn.divide(dividend, divisor)
         reference_points_cam.set_module(self)
         x = reference_points_cam[..., 0]
@@ -231,10 +238,13 @@ class TtBEVFormerEncoder(SimNN.Module):
         b = reference_points_cam[..., 0:1]
         a = ttnn.Tensor(shape=a.shape, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
         b = ttnn.Tensor(shape=b.shape, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
-        y_gt_0 = ttnn.compare(a, 0.0, 'greater')
-        y_lt_1 = ttnn.compare(a, 1.0, 'less')
-        x_gt_0 = ttnn.compare(b, 0.0, 'greater')
-        x_lt_1 = ttnn.compare(b, 1.0, 'less')
+        zero_tensor = ttnn.full(a.shape, 0.0, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
+        one_tensor = ttnn.full(a.shape, 1.0, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
+        
+        y_gt_0 = ttnn.compare(a, zero_tensor, 'greater')
+        y_lt_1 = ttnn.compare(a, one_tensor, 'less')
+        x_gt_0 = ttnn.compare(b, zero_tensor, 'greater')
+        x_lt_1 = ttnn.compare(b, one_tensor, 'less')
         bev_mask = ttnn.Tensor(shape=y_gt_0.shape, dtype=ttnn.bool, device=self.device, layout=ttnn.Layout.TILE_LAYOUT)
         reference_points_cam = ttnn.permute(reference_points_cam, [2, 1, 3, 0, 4])
         bev_mask = ttnn.permute(bev_mask, [2, 1, 3, 0, 4])

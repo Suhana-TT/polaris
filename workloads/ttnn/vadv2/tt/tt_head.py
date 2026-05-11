@@ -925,7 +925,9 @@ class TtVADHead(SimNN.Module):
         y_sq = ttnn.pow(y, const_2)
         result = ttnn.add(x_sq, y_sq)
         map_dis = ttnn.sqrt(result)
-        valid_map_inst = ttnn.compare(map_dis, dis_thresh, "less_equal") # [B, A, max_P]
+        dis_thresh_tensor = ttnn.full(shape=map_dis.shape, fill_value=dis_thresh, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.TILE_LAYOUT)
+        valid_map_inst = ttnn.compare(map_dis, dis_thresh_tensor, "less_equal") # [B, A, max_P]
+        # valid_map_inst = ttnn.compare(map_dis, dis_thresh, "less_equal") # [B, A, max_P]
         invalid_map_inst = valid_map_inst == False
         selected_padding_mask = selected_padding_mask + invalid_map_inst
         if TYPE_CHECKING:
@@ -938,17 +940,28 @@ class TtVADHead(SimNN.Module):
         if TYPE_CHECKING:
             assert selected_padding_mask.shape is not None
             assert selected_map_query.shape is not None
+            assert selected_map_pos.shape is not None
         num_batch = selected_padding_mask.shape[0]
         feat_dim = selected_map_query.shape[-1]
         if use_fix_pad:
-            pad_map_query = ttnn.zeros((num_batch, 1, feat_dim), device=self.device, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT)
-            pad_map_pos = ttnn.ones((num_batch, 1, 2), device=self.device, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT)
-            a = ttnn.full(shape=[1], fill_value=False, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.TILE_LAYOUT)
-            a = ttnn.from_torch(a, dtype=ttnn.bfloat16, device=self.device)
-            pad_lane_mask = ttnn.repeat(ttnn.unsqueeze(a, 0), [num_batch, 1])
+            batch_size = int(selected_map_pos.shape[0])
+            feat_dim_int = int(selected_map_query.shape[-1])
+            pad_map_query = ttnn.full(shape=(batch_size, 1, feat_dim_int), fill_value=0.0, device=self.device, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT)
+            pad_map_pos = ttnn.full(shape=(batch_size, 1, 2), fill_value=1.0, device=self.device, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT)
+            pad_lane_mask = ttnn.full(
+                 shape=(num_batch, 1),
+                 fill_value=False,
+                 dtype=ttnn.bool,
+                 device=self.device,
+                 layout=ttnn.TILE_LAYOUT,
+             )
 
             selected_map_query = ttnn.concat(selected_map_query, pad_map_query, axis=1)
             pad_map_pos = ttnn.to_layout(pad_map_pos, layout=ttnn.TILE_LAYOUT)
+            if TYPE_CHECKING:
+                assert selected_map_pos.shape is not None
+                assert pad_map_pos.shape is not None
+
             selected_map_pos = ttnn.concat(selected_map_pos, pad_map_pos, axis=1)
             pad_lane_mask = ttnn.to_layout(pad_lane_mask, layout=ttnn.TILE_LAYOUT)
             selected_padding_mask = ttnn.concat(selected_padding_mask, pad_lane_mask, axis=1)
@@ -960,8 +973,9 @@ class TtVADHead(SimNN.Module):
         query_score = ttnn.to_layout(query_score, layout=ttnn.ROW_MAJOR_LAYOUT)
         query_score = ttnn.add(query_score, 0.0, dtype=ttnn.float32)
         query_score = ttnn.max(query_score, dim=-1) #[0]
-        query_idx = ttnn.compare(query_score, score_thresh, "greater")
-
+        score_thresh_tensor = ttnn.full(shape=query_score.shape, fill_value=score_thresh, dtype=ttnn.bfloat16, device=self.device, layout=ttnn.TILE_LAYOUT)
+        query_idx = ttnn.compare(query_score, score_thresh_tensor, "greater")
+    
         selected_query = ttnn.Tensor(shape=[1,100,256], dtype=ttnn.bfloat16, device=self.device)
         selected_query_pos = ttnn.Tensor(shape=[1,100,2], dtype=ttnn.bfloat16, device=self.device)
         selected_padding_mask = ttnn.Tensor(shape=[1,100], dtype=ttnn.bfloat16, device=self.device)

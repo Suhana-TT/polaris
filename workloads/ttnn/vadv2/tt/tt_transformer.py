@@ -280,6 +280,12 @@ class TtVADPerceptionTransformer(SimNN.Module):
         query_pos = object_query_embed[:, : self.embed_dims]
         query = object_query_embed[:, self.embed_dims :]
 
+        if not isinstance(query_pos, ttnn.Tensor):
+            query_pos = ttnn.Tensor(shape=query_pos.shape, dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT, device=self.device, data=query_pos.data)
+        if not isinstance(query, ttnn.Tensor):
+            query = ttnn.Tensor(shape=query.shape, dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT, device=self.device, data=query.data)
+        
+
         query_pos = ttnn.unsqueeze(query_pos, 0)
         query_pos = ttnn.Tensor(shape=query_pos.shape, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=self.device, data=query_pos.data)
         # query_pos = ttnn.expand(query_pos, [bs, -1, -1])
@@ -303,6 +309,11 @@ class TtVADPerceptionTransformer(SimNN.Module):
         map_query_embed.set_module(self)
         map_query_pos = map_query_embed[:, : self.embed_dims]
         map_query = map_query_embed[:, self.embed_dims :]
+        if not isinstance(map_query_pos, ttnn.Tensor):
+            map_query_pos = ttnn.Tensor(shape=map_query_pos.shape, dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT, device=self.device, data=map_query_pos.data)
+        if not isinstance(map_query, ttnn.Tensor):
+            map_query = ttnn.Tensor(shape=map_query.shape, dtype=ttnn.bfloat16, layout=ttnn.ROW_MAJOR_LAYOUT, device=self.device, data=map_query.data)
+        
         map_query_pos = ttnn.unsqueeze(map_query_pos, 0)
         map_query_pos = ttnn.Tensor(shape=map_query_pos.shape, dtype=ttnn.bfloat16, layout=ttnn.TILE_LAYOUT, device=self.device, data=map_query_pos.data)
 

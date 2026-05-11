@@ -187,11 +187,11 @@ class Parameter:
 def test_vadv2_backbone(device):
     torch_input = ttnn._rand([6, 3, 384, 640], dtype=ttnn.bfloat16, device=device)
     ttnn_input_tensor = torch_input
-    logger.debug("ttnn_input_tensor shape:", ttnn_input_tensor.shape, "and dtype:", ttnn_input_tensor.dtype)
+    logger.debug(f"ttnn_input_tensor shape: {ttnn_input_tensor.shape} and dtype: {ttnn_input_tensor.dtype}")
     parameter = Parameter()
     ttnn_model = tt_backbone.TtResnet50(parameter.conv_args, parameter.res_model, device)
     ttnn_output = ttnn_model(ttnn_input_tensor, batch_size=6)[0]
-    logger.debug("ttnn_output shape:", ttnn_output.shape)
+    logger.debug(f"ttnn_output shape: {ttnn_output.shape}")
 
 if __name__ == "__main__":
     test_vadv2_backbone(mesh_device)

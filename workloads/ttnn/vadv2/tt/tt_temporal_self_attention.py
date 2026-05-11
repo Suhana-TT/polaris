@@ -134,10 +134,12 @@ class TtTemporalSelfAttention(SimNN.Module):
 
         if reference_points.shape[-1] == 2:
             spatial_shapes.set_module(self)
-            slice_sp_s0 = spatial_shapes[..., 0].shape
-            slice_sp_s1 = spatial_shapes[..., 1].shape
-            sp_s1 = ttnn._rand(slice_sp_s1, dtype=ttnn.bfloat16, device=query.device)
-            sp_s0 = ttnn._rand(slice_sp_s0, dtype=ttnn.bfloat16, device=query.device)
+            num_levels = spatial_shapes.shape[0]  # This is 1
+            slice_shape = (num_levels,)  # Shape should be [1] for each column
+            # slice_sp_s0 = spatial_shapes[..., 0].shape
+            # slice_sp_s1 = spatial_shapes[..., 1].shape
+            sp_s1 = ttnn._rand(slice_shape, dtype=ttnn.bfloat16, device=query.device)
+            sp_s0 = ttnn._rand(slice_shape, dtype=ttnn.bfloat16, device=query.device)
             offset_normalizer = ttnn.stack([sp_s0, sp_s1], dim=-1)
             bs_r, num_query, num_levels, _ = reference_points.shape
             reference_points_shape = reference_points.shape
