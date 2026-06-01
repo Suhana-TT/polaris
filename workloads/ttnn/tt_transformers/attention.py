@@ -522,8 +522,7 @@ class Attention():
             is_decode_mode=False,
         )
         ttnn.deallocate(q_heads_1QSD_pre_rot)
-
-        if DataType.from_numpy(k_heads_1KSD_pre_rot.dtype) != ttnn.bfloat16:  # Rotary embeddings require bfloat16 inputs
+        if DataType.from_numpy(k_heads_1KSD_pre_rot.dtype) != ttnn.bfloat16:
             k_heads_1KSD_pre_rot = ttnn.typecast(k_heads_1KSD_pre_rot, dtype=ttnn.bfloat16)
 
         k_heads_1KSD = utils.rotary_embedding_llama(
@@ -535,8 +534,63 @@ class Attention():
         )
         ttnn.deallocate(k_heads_1KSD_pre_rot)
 
+        # KV cache fill
+        if kv_cache is not None:
+            keys_BKSD = kv_cache[0]
+            values_BKSD = kv_cache[1]
+        else:
+            keys_BKSD = self.layer_past[0]
+            values_BKSD = self.layer_past[1]
+        
+        k_fill = ttnn.typecast(k_heads_1KSD, dtype=self.kv_cache_dtype)
+        v_fill = ttnn.typecast(v_heads_1VSD, dtype=self.kv_cache_dtype)
+
+        
+        fill_page_table = chunk_page_table if chunk_page_table is not None else page_table
+
+        if fill_page_table is not None:
+            block_size = keys_BKSD.shape[2]
+            page_len = fill_page_table.shape[1] * block_size
+
+            k_fill_sliced = k_fill[:, :, :page_len, :] if page_len < k_fill.shape[2] else k_fill
+            v_fill_sliced = v_fill[:, :, :page_len, :] if page_len < v_fill.shape[2] else v_fill
+
+            utils.paged_fill_cache(
+                keys_BKSD,
+                k_fill_sliced,
+                fill_page_table,
+                batch_idx=user_id,
+            )
+            utils.paged_fill_cache(
+                values_BKSD,
+                v_fill_sliced,
+                fill_page_table,
+                batch_idx=user_id,
+            )
+
+            if k_fill_sliced is not k_fill:
+                ttnn.deallocate(k_fill_sliced)
+            if v_fill_sliced is not v_fill:
+                ttnn.deallocate(v_fill_sliced)
+        else:
+            utils.fill_cache(
+                keys_BKSD,
+                k_fill,
+                user_id % self.batch_size_per_device_group,
+            )
+            utils.fill_cache(
+                values_BKSD,
+                v_fill,
+                user_id % self.batch_size_per_device_group,
+            )
+
         k_heads_1KSD_8b = ttnn.typecast(k_heads_1KSD, dtype=ttnn.bfloat8_b)#keys_BKSD.dtype)
         v_heads_1VSD_8b = ttnn.typecast(v_heads_1VSD, dtype=ttnn.bfloat8_b)#values_BKSD.dtype)
+        
+        ttnn.deallocate(k_fill)
+        ttnn.deallocate(v_fill)
+        ttnn.deallocate(k_heads_1KSD)
+        ttnn.deallocate(v_heads_1VSD)
 
         # SDPA
         q_heads_1QSD_8b = ttnn.typecast(q_heads_1QSD, dtype=self.activation_dtype) # or ttnn.bfloat8_b)
